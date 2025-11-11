@@ -39,33 +39,28 @@ st.markdown("Kies een app via de tegels hieronder of via de sidebar links.")
 col1, col2, col3 = st.columns(3)
 
 with col1:
-    st.markdown("### 📧 Email Inkoop")
-    if st.button("Open Email Inkoop"):
+    if st.button("### 📧 Email Inkoop"):
         st.switch_page("pages/Email_Inkoop.py")
     st.markdown("</div>", unsafe_allow_html=True)
 
 with col2:
-    st.markdown("### 🚛 Extra Kuub")
-    if st.button("Open Extra Kuub"):
+    if st.button("### 🚛 Extra Kuub"):
         st.switch_page("pages/Extra_Kuub.py")
     st.markdown("</div>", unsafe_allow_html=True)
 
 with col3:
-    st.markdown("### 🧾 Gratis service")
-    if st.button("Open Gratis service"):
+    if st.button("### 🧾 Gratis service"):
         st.switch_page("pages/gratis_service_app.py")
     st.markdown("</div>", unsafe_allow_html=True)
 
 col4, col5, _ = st.columns(3)
 
 with col4:
-    st.markdown("### ⚖️ RVKO Gewichten")
-    if st.button("Open RVKO Gewichten"):
+    if st.button("### ⚖️ RVKO Gewichten"):
         st.switch_page("pages/RVKO_Gewichten.py")
     st.markdown("</div>", unsafe_allow_html=True)
 
 with col5:
-    st.markdown("### 💸 Selfbilling")
-    if st.button("Open Selfbilling"):
+    if st.button("### 💸 Selfbilling"):
         st.switch_page("pages/Selfbilling.py")
     st.markdown("</div>", unsafe_allow_html=True)
