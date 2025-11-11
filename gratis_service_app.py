@@ -8,7 +8,6 @@ import pandas as pd
 import streamlit as st
 
 import spacy
-from spacy.cli import download as spacy_download
 
 # scikit-learn
 from sklearn.feature_extraction.text import TfidfVectorizer
