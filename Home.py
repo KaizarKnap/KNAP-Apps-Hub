@@ -1,64 +1,85 @@
 import streamlit as st
 
-st.set_page_config(
-    page_title="KNAP Apps Hub",
-    layout="wide",
-)
+st.set_page_config(page_title="KNAP Apps Hub", layout="wide")
 
-# Breder maken
+# --- Layout en knop-styling (knoppen als kaarten) ---
 st.markdown(
     """
     <style>
     .block-container {
         padding-top: 2rem;
         padding-bottom: 2rem;
-        padding-left: 2rem;
-        padding-right: 2rem;
-        max-width: 1600px;
+        max-width: 1100px;
         margin: 0 auto;
     }
-    .app-card {
-        border-radius: 16px;
-        padding: 1.5rem;
-        border: 1px solid #e0e0e0;
-        transition: transform 0.1s ease, box-shadow 0.1s ease, border-color 0.1s ease;
+    /* Maak de knoppen op kaarten lijken */
+    div.stButton > button {
+        width: 100%;
+        text-align: left;
+        border-radius: 15px;
+        padding: 1rem 1.25rem;
+        border: 1px solid rgba(255,255,255,0.15);
+        background-color: rgba(255,255,255,0.03);
+        font-size: 0.95rem;
+        line-height: 1.4;
     }
-    .app-card:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 8px 20px rgba(0,0,0,0.06);
-        border-color: #999;
+    div.stButton > button:hover {
+        border-color: rgba(255,255,255,0.35);
+        background-color: rgba(255,255,255,0.07);
     }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
-st.set_page_config(page_title="KNAP Apps Hub", layout="wide")
-
 st.title("💼 KNAP Apps Hub")
-st.markdown("Kies een app via de knoppen hieronder of via de sidebar links.")
+st.markdown(
+    """
+    Kies een app door op een kaart hieronder te klikken (of via de sidebar links). 
+      \nMocht je vragen of suggesties hebben, neem dan contact op via t.knap@milieuservice.nl
 
-# lijst van apps: (label op knop, pad naar page, korte beschrijving)
+    """
+)
+
+# (titel, beschrijving, pad naar page)
 apps = [
-    ("📧 Email Inkoop", "pages/Email_Inkoop.py",
-     "Inkoop / ledigingsschema uit e-mails (.msg)."),
-    ("🚛 Extra Kuub", "pages/Extra_Kuub.py",
-     "Extra kuubs / extra bakken analyseren."),
-    ("🧾 Gratis service", "pages/gratis_service_app.py",
-     "Gratis / niet-te-factureren service-orders."),
-    ("⚖️ RVKO Gewichten", "pages/RVKO_Gewichten.py",
-     "RVKO gewichten koppelen / controleren."),
-    ("💸 Selfbilling", "pages/Selfbilling.py",
-     "Selfbilling per leverancier."),
+    (
+        "### 📧 Email Inkoop",
+        "Renewi mail omzetten naar ledigingsschema",
+        "pages/Email_Inkoop.py",
+    ),
+    (
+        "### 🚛 Extra Kuub",
+        "Extra kuubs / extra bakken per order analyseren.",
+        "pages/Extra_Kuub.py",
+    ),
+    (
+        "### 🧾 Gratis service",
+        "Gratis service onderzoek.",
+        "pages/gratis_service_app.py",
+    ),
+    (
+        "### ⚖️ RVKO Gewichten",
+        "RVKO-gewichten koppelen en controleren.",
+        "pages/RVKO_Gewichten.py",
+    ),
+    (
+        "### 💸 Selfbilling",
+        "Selfbilling per leverancier berekenen en exporteren.",
+        "pages/Selfbilling.py",
+    ),
 ]
 
 st.write("")
 
-for label, page_path, description in apps:
-    with st.container():
-        col_left, col_center, col_right = st.columns([1, 2, 1])
-        with col_center:
-            if st.button(label, use_container_width=True):
-                st.switch_page(page_path)
-            st.caption(description)
-        st.divider()
+for i, (title, description, page_path) in enumerate(apps):
+    # Eén kaart = één knop met titel + uitleg erin
+    label = f"{title}\n{description}"
+
+    # Middenkolom gebruiken zodat de kaart niet schermbreed is
+    col_left, col_right = st.columns([2, 1])
+    with col_left:
+        if st.button(label, key=f"app_{i}"):
+            st.switch_page(page_path)
+
+    st.write("")
