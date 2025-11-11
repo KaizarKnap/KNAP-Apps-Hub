@@ -3,5 +3,5 @@ pandas
 numpy
 openpyxl
 extract_msg
-scikit-learn
 spacy
+scikit-learn
