@@ -30,10 +30,10 @@ Welkom bij de interne KNAP Apps hub.
 
 Gebruik de **sidebar links** om een tool te kiezen:
 
-- 📧 **Email_Inkoop** – Inkoop / ledigingsschema uit e-mails / .msg  
-- 🚛 **Extra_Kuub** – Extra kuubs / extra bakken analyseren  
-- 🧾 **gratis_service_app** – Gratis / niet-te-factureren service-orders  
-- ⚖️ **RVKO_Gewichten** – RVKO gewichten koppelen / controleren  
+- 📧 **Email Inkoop** – Inkoop / ledigingsschema uit e-mails / .msg  
+- 🚛 **Extra Kuub** – Extra kuubs / extra bakken analyseren  
+- 🧾 **Gratis Service** – Gratis / niet-te-factureren service-orders  
+- ⚖️ **RVKO Gewichten** – RVKO gewichten koppelen / controleren  
 - 💸 **Selfbilling** – Self-billing per leverancier  
 
 Elke tool is een aparte Streamlit-pagina (bestand in `pages/`), maar draait onder deze ene app.
