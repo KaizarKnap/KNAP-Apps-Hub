@@ -1,3 +1,4 @@
+# Home.py
 import streamlit as st
 
 import Email_Inkoop
@@ -11,6 +12,7 @@ st.set_page_config(
     layout="wide",
 )
 
+# Breder maken
 st.markdown(
     """
     <style>
@@ -27,6 +29,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+# 👉 SIDEBAR NAVIGATIE
 st.sidebar.title("KNAP Apps Hub")
 pagina = st.sidebar.radio(
     "Kies een tool:",
@@ -40,24 +43,26 @@ pagina = st.sidebar.radio(
     ),
 )
 
+# 👉 CENTRALE CONTENT – SLECHTS ÉÉN TAK ACTIEF
 if pagina == "🏠 Overzicht":
     st.title("🧰 KNAP Apps Hub")
+
     st.markdown(
         """
 Welkom bij de interne KNAP Apps hub.
 
-Kies links in de sidebar welke tool je wilt gebruiken:
+Gebruik de **sidebar links** om een tool te kiezen:
 
-- 📧 **Email_Inkoop**
-- 🚛 **Extra_Kuub**
-- 🧾 **gratis_service_app**
-- ⚖️ **RVKO_Gewichten**
-- 💸 **Selfbilling**
+- 📧 **Email_Inkoop** – Inkoop / ledigingsschema uit e-mails / .msg  
+- 🚛 **Extra_Kuub** – Extra kuubs / extra bakken analyseren  
+- 🧾 **gratis_service_app** – Gratis / niet-te-factureren service-orders  
+- ⚖️ **RVKO_Gewichten** – RVKO gewichten koppelen / controleren  
+- 💸 **Selfbilling** – Self-billing per leverancier  
 """
     )
 
 elif pagina == "📧 Email_Inkoop":
-    Email_Inkoop.run()
+    Email_Inkoop.run()      
 
 elif pagina == "🚛 Extra_Kuub":
     Extra_Kuub.run()
