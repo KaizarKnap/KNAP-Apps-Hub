@@ -33,34 +33,35 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-st.title("🧰 KNAP Apps Hub")
-st.markdown("Kies een app via de tegels hieronder of via de sidebar links.")
+st.set_page_config(page_title="KNAP Apps Hub", layout="wide")
 
-col1, col2, col3 = st.columns(3)
+st.title("💼 KNAP Apps Hub")
+st.markdown("Kies een app via de knoppen hieronder of via de sidebar links.")
 
-with col1:
-    if st.button("### 📧 Email Inkoop"):
-        st.switch_page("pages/Email_Inkoop.py")
-    st.markdown("</div>", unsafe_allow_html=True)
+# lijst van apps: (label op knop, pad naar page, korte beschrijving)
+apps = [
+    ("📧 Email Inkoop", "pages/Email_Inkoop.py",
+     "Inkoop / ledigingsschema uit e-mails (.msg)."),
+    ("🚛 Extra Kuub", "pages/Extra_Kuub.py",
+     "Extra kuubs / extra bakken analyseren."),
+    ("🧾 Gratis service", "pages/gratis_service_app.py",
+     "Gratis / niet-te-factureren service-orders."),
+    ("⚖️ RVKO Gewichten", "pages/RVKO_Gewichten.py",
+     "RVKO gewichten koppelen / controleren."),
+    ("💸 Selfbilling", "pages/Selfbilling.py",
+     "Selfbilling per leverancier."),
+]
 
-with col2:
-    if st.button("### 🚛 Extra Kuub"):
-        st.switch_page("pages/Extra_Kuub.py")
-    st.markdown("</div>", unsafe_allow_html=True)
+st.write("")  # beetje ruimte
 
-with col3:
-    if st.button("### 🧾 Gratis service"):
-        st.switch_page("pages/gratis_service_app.py")
-    st.markdown("</div>", unsafe_allow_html=True)
+for label, page_path, description in apps:
+    with st.container():
+        # brede knop met titel & icoon
+        if st.button(label, use_container_width=True):
+            st.switch_page(page_path)
 
-col4, col5, _ = st.columns(3)
+        # korte uitleg eronder
+        st.caption(description)
 
-with col4:
-    if st.button("### ⚖️ RVKO Gewichten"):
-        st.switch_page("pages/RVKO_Gewichten.py")
-    st.markdown("</div>", unsafe_allow_html=True)
-
-with col5:
-    if st.button("### 💸 Selfbilling"):
-        st.switch_page("pages/Selfbilling.py")
-    st.markdown("</div>", unsafe_allow_html=True)
+        # scheidingslijn tussen apps
+        st.divider()
