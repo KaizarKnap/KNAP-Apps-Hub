@@ -8,6 +8,7 @@ import pandas as pd
 import streamlit as st
 
 import spacy
+from spacy.cli import download as spacy_download
 
 # scikit-learn
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -15,14 +16,12 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
 
 try:
-    nlp = spacy.load("nl_core_news_sm")
-except Exception:
-    nlp = None  # geen model beschikbaar
+    spacy.load("nl_core_news_sm")
+except OSError:
+    spacy_download("nl_core_news_sm")
 
 # =============== Page & header ===============
-def run():
-    st.title("🧾 Gratis weggegeven orders — Analyzer")
-    
+st.title("🧾 Gratis weggegeven orders — Analyzer")
 st.markdown(
     """
 Deze app vindt en analyseert orders die **gratis** of **niet te factureren** zijn
