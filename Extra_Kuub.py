@@ -12,8 +12,9 @@ except locale.Error:
     except locale.Error:
         # Fallback voor Streamlit Cloud
         locale.setlocale(locale.LC_TIME, 'C')
-
-st.title("🚛 Extra Afval Dashboard")
+def run():
+    st.title("🚛 Extra Afval Dashboard")
+    
 st.write("""
 Analyseer automatisch extra afval per order en zie direct hoeveel **extra bakken** zijn geledigd.  
 Deze versie berekent het aantal extra bakken op basis van **Extra m³ / Volume per bak**.

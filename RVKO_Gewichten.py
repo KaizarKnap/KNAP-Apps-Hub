@@ -5,7 +5,8 @@ import re
 from datetime import timedelta
 
 # GEEN st.set_page_config hier (dat gebeurt in Home.py)
-st.title("⚖️ RVKO Gewichten koppelen en controleren")
+def run():
+    st.title("⚖️ RVKO Gewichten koppelen en controleren")
 
 st.write("""
 Deze app koppelt weeggegevens aan je data en vult automatisch de kolom **'Gewicht'** aan.  

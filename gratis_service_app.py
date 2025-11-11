@@ -21,7 +21,9 @@ except OSError:
     spacy_download("nl_core_news_sm")
 
 # =============== Page & header ===============
-st.title("🧾 Gratis weggegeven orders — Analyzer")
+def run():
+    st.title("🧾 Gratis weggegeven orders — Analyzer")
+    
 st.markdown(
     """
 Deze app vindt en analyseert orders die **gratis** of **niet te factureren** zijn

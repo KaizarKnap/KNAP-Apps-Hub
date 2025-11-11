@@ -3,7 +3,8 @@ import pandas as pd
 import streamlit as st
 
 # GEEN st.set_page_config hier (dat gebeurt in Home.py)
-st.title("🧾 Self-billing per leverancier")
+def run():
+    st.title("🧾 Self-billing per leverancier")
 st.caption("Upload leveranciers-Excel(s), bereken automatisch de self-billing en exporteer het resultaat.")
 
 
