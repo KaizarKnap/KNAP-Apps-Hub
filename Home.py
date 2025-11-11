@@ -50,22 +50,22 @@ apps = [
     ),
     (
         "### 🚛 Extra Kuub",
-        "Extra kuubs / extra bakken per order analyseren.",
+        "Extra kuubs / extra bakken per order analyseren",
         "pages/Extra_Kuub.py",
     ),
     (
         "### 🧾 Gratis service",
-        "Gratis service onderzoek.",
+        "Gratis service onderzoek",
         "pages/gratis_service_app.py",
     ),
     (
         "### ⚖️ RVKO Gewichten",
-        "RVKO-gewichten koppelen en controleren.",
+        "RVKO-gewichten koppelen en controleren",
         "pages/RVKO_Gewichten.py",
     ),
     (
         "### 💸 Selfbilling",
-        "Selfbilling per leverancier berekenen en exporteren.",
+        "Selfbilling per leverancier berekenen en exporteren",
         "pages/Selfbilling.py",
     ),
 ]
