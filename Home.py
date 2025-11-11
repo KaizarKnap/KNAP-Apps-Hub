@@ -1,18 +1,11 @@
-# Home.py
 import streamlit as st
-
-import Email_Inkoop
-import Extra_Kuub
-import gratis_service_app
-import RVKO_Gewichten
-import Selfbilling
 
 st.set_page_config(
     page_title="KNAP Apps Hub",
     layout="wide",
 )
 
-# Breder maken
+# 🔹 Klein CSS-blokje om de pagina breder te maken
 st.markdown(
     """
     <style>
@@ -21,7 +14,7 @@ st.markdown(
         padding-bottom: 2rem;
         padding-left: 2rem;
         padding-right: 2rem;
-        max-width: 1600px;
+        max-width: 1600px;  /* maak groter (bv. 1800) of gebruik 'none' voor echt full width */
         margin: 0 auto;
     }
     </style>
@@ -29,26 +22,10 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# 👉 SIDEBAR NAVIGATIE
-st.sidebar.title("KNAP Apps Hub")
-pagina = st.sidebar.radio(
-    "Kies een tool:",
-    (
-        "🏠 Overzicht",
-        "📧 Email_Inkoop",
-        "🚛 Extra_Kuub",
-        "🧾 gratis_service_app",
-        "⚖️ RVKO_Gewichten",
-        "💸 Selfbilling",
-    ),
-)
+st.title("🧰 KNAP Apps Hub")
 
-# 👉 CENTRALE CONTENT – SLECHTS ÉÉN TAK ACTIEF
-if pagina == "🏠 Overzicht":
-    st.title("🧰 KNAP Apps Hub")
-
-    st.markdown(
-        """
+st.markdown(
+    """
 Welkom bij de interne KNAP Apps hub.
 
 Gebruik de **sidebar links** om een tool te kiezen:
@@ -58,20 +35,12 @@ Gebruik de **sidebar links** om een tool te kiezen:
 - 🧾 **gratis_service_app** – Gratis / niet-te-factureren service-orders  
 - ⚖️ **RVKO_Gewichten** – RVKO gewichten koppelen / controleren  
 - 💸 **Selfbilling** – Self-billing per leverancier  
+
+Elke tool is een aparte Streamlit-pagina (bestand in `pages/`), maar draait onder deze ene app.
 """
-    )
+)
 
-elif pagina == "📧 Email_Inkoop":
-    Email_Inkoop.run()      
-
-elif pagina == "🚛 Extra_Kuub":
-    Extra_Kuub.run()
-
-elif pagina == "🧾 gratis_service_app":
-    gratis_service_app.run()
-
-elif pagina == "⚖️ RVKO_Gewichten":
-    RVKO_Gewichten.run()
-
-elif pagina == "💸 Selfbilling":
-    Selfbilling.run()
+st.info(
+    "ℹ️ Tip: open de sidebar (links bovenin op het '>>' icoontje) "
+    "als je het paginamenu niet ziet."
+)

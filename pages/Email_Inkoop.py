@@ -4,8 +4,7 @@ import re
 import extract_msg
 from io import BytesIO
 
-def run():
-    st.title("📧 Email Inkoop – ledigingsschema uit e-mails / .msg-bestanden")
+st.title("📧 Email Inkoop – ledigingsschema uit .msg-bestanden")
 
 st.markdown("Upload één of meerdere `.msg`-bestanden en download het resultaat als Excel-bestand.")
 
