@@ -40,21 +40,18 @@ col1, col2, col3 = st.columns(3)
 
 with col1:
     st.markdown("### 📧 Email Inkoop")
-    st.markdown('<div class="app-card">Inkoop / ledigingsschema uit e-mails / .msg.<br><br>', unsafe_allow_html=True)
     if st.button("Open Email Inkoop"):
         st.switch_page("pages/Email_Inkoop.py")
     st.markdown("</div>", unsafe_allow_html=True)
 
 with col2:
     st.markdown("### 🚛 Extra Kuub")
-    st.markdown('<div class="app-card">Extra kuubs / extra bakken analyseren.<br><br>', unsafe_allow_html=True)
     if st.button("Open Extra Kuub"):
         st.switch_page("pages/Extra_Kuub.py")
     st.markdown("</div>", unsafe_allow_html=True)
 
 with col3:
     st.markdown("### 🧾 Gratis service")
-    st.markdown('<div class="app-card">Gratis / niet-te-factureren service-orders.<br><br>', unsafe_allow_html=True)
     if st.button("Open Gratis service"):
         st.switch_page("pages/gratis_service_app.py")
     st.markdown("</div>", unsafe_allow_html=True)
@@ -63,14 +60,12 @@ col4, col5, _ = st.columns(3)
 
 with col4:
     st.markdown("### ⚖️ RVKO Gewichten")
-    st.markdown('<div class="app-card">RVKO gewichten koppelen / controleren.<br><br>', unsafe_allow_html=True)
     if st.button("Open RVKO Gewichten"):
         st.switch_page("pages/RVKO_Gewichten.py")
     st.markdown("</div>", unsafe_allow_html=True)
 
 with col5:
     st.markdown("### 💸 Selfbilling")
-    st.markdown('<div class="app-card">Selfbilling per leverancier.<br><br>', unsafe_allow_html=True)
     if st.button("Open Selfbilling"):
         st.switch_page("pages/Selfbilling.py")
     st.markdown("</div>", unsafe_allow_html=True)
