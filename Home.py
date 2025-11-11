@@ -5,7 +5,7 @@ st.set_page_config(
     layout="wide",
 )
 
-st.sidebar.title("Navigatie")
+st.sidebar.title("Navigatie apps")
 
 # 🔹 Klein CSS-blokje om de pagina breder te maken
 st.markdown(
