@@ -52,16 +52,13 @@ apps = [
      "Selfbilling per leverancier."),
 ]
 
-st.write("")  # beetje ruimte
+st.write("")
 
 for label, page_path, description in apps:
     with st.container():
-        # brede knop met titel & icoon
-        if st.button(label, use_container_width=True):
-            st.switch_page(page_path)
-
-        # korte uitleg eronder
-        st.caption(description)
-
-        # scheidingslijn tussen apps
+        col_left, col_center, col_right = st.columns([1, 2, 1])
+        with col_center:
+            if st.button(label, use_container_width=True):
+                st.switch_page(page_path)
+            st.caption(description)
         st.divider()
