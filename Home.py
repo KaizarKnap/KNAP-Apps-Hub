@@ -40,47 +40,37 @@ col1, col2, col3 = st.columns(3)
 
 with col1:
     st.markdown("### 📧 Email Inkoop")
-    with st.container():
-        st.markdown('<div class="app-card">', unsafe_allow_html=True)
-        st.write("Inkoop / ledigingsschema uit e-mails / .msg.")
-        if st.button("Open Email Inkoop", key="btn_email"):
-            st.switch_page("pages/Email_Inkoop.py")
-        st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown('<div class="app-card">Inkoop / ledigingsschema uit e-mails / .msg.<br><br>', unsafe_allow_html=True)
+    if st.button("Open Email Inkoop"):
+        st.switch_page("pages/Email_Inkoop.py")
+    st.markdown("</div>", unsafe_allow_html=True)
 
 with col2:
     st.markdown("### 🚛 Extra Kuub")
-    with st.container():
-        st.markdown('<div class="app-card">', unsafe_allow_html=True)
-        st.write("Extra kuubs / extra bakken analyseren.")
-        if st.button("Open Extra Kuub", key="btn_extra"):
-            st.switch_page("pages/Extra_Kuub.py")
-        st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown('<div class="app-card">Extra kuubs / extra bakken analyseren.<br><br>', unsafe_allow_html=True)
+    if st.button("Open Extra Kuub"):
+        st.switch_page("pages/Extra_Kuub.py")
+    st.markdown("</div>", unsafe_allow_html=True)
 
 with col3:
     st.markdown("### 🧾 Gratis service")
-    with st.container():
-        st.markdown('<div class="app-card">', unsafe_allow_html=True)
-        st.write("Gratis / niet-te-factureren service-orders.")
-        if st.button("Open Gratis service", key="btn_gratis"):
-            st.switch_page("pages/gratis_service_app.py")
-        st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown('<div class="app-card">Gratis / niet-te-factureren service-orders.<br><br>', unsafe_allow_html=True)
+    if st.button("Open Gratis service"):
+        st.switch_page("pages/gratis_service_app.py")
+    st.markdown("</div>", unsafe_allow_html=True)
 
 col4, col5, _ = st.columns(3)
 
 with col4:
     st.markdown("### ⚖️ RVKO Gewichten")
-    with st.container():
-        st.markdown('<div class="app-card">', unsafe_allow_html=True)
-        st.write("RVKO gewichten koppelen / controleren.")
-        if st.button("Open RVKO Gewichten", key="btn_rvko"):
-            st.switch_page("pages/RVKO_Gewichten.py")
-        st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown('<div class="app-card">RVKO gewichten koppelen / controleren.<br><br>', unsafe_allow_html=True)
+    if st.button("Open RVKO Gewichten"):
+        st.switch_page("pages/RVKO_Gewichten.py")
+    st.markdown("</div>", unsafe_allow_html=True)
 
 with col5:
     st.markdown("### 💸 Selfbilling")
-    with st.container():
-        st.markdown('<div class="app-card">', unsafe_allow_html=True)
-        st.write("Selfbilling per leverancier.")
-        if st.button("Open Selfbilling", key="btn_selfbilling"):
-            st.switch_page("pages/Selfbilling.py")
-        st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown('<div class="app-card">Selfbilling per leverancier.<br><br>', unsafe_allow_html=True)
+    if st.button("Open Selfbilling"):
+        st.switch_page("pages/Selfbilling.py")
+    st.markdown("</div>", unsafe_allow_html=True)
