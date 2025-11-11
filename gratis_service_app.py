@@ -16,9 +16,9 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
 
 try:
-    spacy.load("nl_core_news_sm")
-except OSError:
-    spacy_download("nl_core_news_sm")
+    nlp = spacy.load("nl_core_news_sm")
+except Exception:
+    nlp = None  # geen model beschikbaar
 
 # =============== Page & header ===============
 def run():
