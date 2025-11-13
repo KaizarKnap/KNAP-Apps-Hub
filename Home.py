@@ -59,7 +59,7 @@ apps = [
         "pages/gratis_service_app.py",
     ),
     (
-        "### ⚖️ RVKO Gewichten",
+        "### 🏫 RVKO Gewichten",
         "RVKO-gewichten koppelen en controleren",
         "pages/RVKO_Gewichten.py",
     ),
@@ -67,6 +67,11 @@ apps = [
         "### 💸 Selfbilling",
         "Selfbilling per leverancier berekenen en exporteren",
         "pages/Selfbilling.py",
+    ),-
+    (
+        "### ⚖️ Gemiddelde gewichten",
+        "Gemiddelde gewichten per leverancier berekenen en exporteren",
+        "pages/gemiddeldegewichten.py",
     ),
 ]
 
