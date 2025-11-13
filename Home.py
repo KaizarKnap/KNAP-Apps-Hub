@@ -67,7 +67,7 @@ apps = [
         "### 💸 Selfbilling",
         "Selfbilling per leverancier berekenen en exporteren",
         "pages/Selfbilling.py",
-    ),-
+    ),
     (
         "### ⚖️ Gemiddelde gewichten",
         "Gemiddelde gewichten per leverancier berekenen en exporteren",
