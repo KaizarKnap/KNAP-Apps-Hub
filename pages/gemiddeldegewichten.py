@@ -116,7 +116,7 @@ if uploaded:
     if len(df_filt) > 5:
 
         plt.style.use("default")
-        fig, ax = plt.subplots(figsize=(10, 6))
+        fig, ax = plt.subplots(figsize=(14, 8))
         fig.patch.set_facecolor("#0d1117")
         ax.set_facecolor("#0d1117")
 
