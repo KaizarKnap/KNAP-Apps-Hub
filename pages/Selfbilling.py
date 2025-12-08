@@ -244,7 +244,6 @@ if files:
         if pd.notna(r["locatienummer"])
     }
 
-
     for _, row in data.iterrows():
         supplier = selected_supplier.lower()
 
@@ -265,9 +264,6 @@ if files:
             bedrag = prijs if qty > 0 else 0.0
 
             loc = normalize_loc(row.get("Locatienummer", ""))
-            if loc in loc_dict:
-                bedrag += loc_dict[loc]
-
             status = str(row.get("Status", "")).strip().lower()
 
             # Handelingskosten alleen bij VOLTOOID
