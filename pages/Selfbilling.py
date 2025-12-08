@@ -83,7 +83,6 @@ def read_excel(file):
 
     return df
 
-
 def get_col(df, hint):
     for c in df.columns:
         if hint.lower() in c.lower():
@@ -130,6 +129,17 @@ def match_price(row, pricing_df, supplier):
         r = df.iloc[0]
         return {"tarieftype": r["tarieftype"], "prijs": r["prijs"]}
     return {"tarieftype": "per_stop", "prijs": 0.0}
+
+def normalize_loc(l):
+    """Zorgt dat locatienummers altijd uniform zijn, ongeacht type of notatie."""
+    if l is None:
+        return ""
+    s = str(l).strip()
+    # Verwijder typische Excel-float artefacten
+    if s.endswith(".0"):
+        s = s[:-2]
+    return s
+
 
 # UI
 selected_supplier = st.selectbox("Kies leverancier:", SUPPLIERS)
@@ -228,7 +238,12 @@ if files:
 
     # Berekening
     results = []
-    loc_dict = {str(r["locatienummer"]).strip(): float(r["handelingskosten"]) for _, r in loc_exceptions.iterrows() if pd.notna(r["locatienummer"])}
+    loc_dict = {
+        normalize_loc(r["locatienummer"]): float(r["handelingskosten"])
+        for _, r in loc_exceptions.iterrows()
+        if pd.notna(r["locatienummer"])
+    }
+
 
     for _, row in data.iterrows():
         supplier = selected_supplier.lower()
@@ -248,9 +263,17 @@ if files:
             prijs = info["prijs"]
             qty = units_from_row(row, info["tarieftype"])
             bedrag = prijs if qty > 0 else 0.0
-            loc = str(row.get("Locatienummer", "")).strip()
+
+            loc = normalize_loc(row.get("Locatienummer", ""))
             if loc in loc_dict:
                 bedrag += loc_dict[loc]
+
+            status = str(row.get("Status", "")).strip().lower()
+
+            # Handelingskosten alleen bij VOLTOOID
+            if status == "voltooid" and loc in loc_dict:
+                bedrag += loc_dict[loc]
+
 
         elif supplier == "visser assen":
             info = match_price(row, pricing_editor, selected_supplier)
