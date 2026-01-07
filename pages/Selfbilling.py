@@ -288,7 +288,7 @@ if files:
         status = str(row.get("Status", "")).strip().lower()
 
         # 1) Status 'Gepland' → altijd 0, wat er ook gebeurt
-        if status == "gepland":
+        if status in ("gepland", "geannuleerd", "discussie"):
             bedrag = 0.0
 
         # 2) Verantwoordelijke partij 'Partner' → altijd 0 (behalve als het al op Gepland 0 stond, maar dat is hetzelfde)
