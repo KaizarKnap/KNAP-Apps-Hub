@@ -236,7 +236,6 @@ if files:
         if excluded:
             st.warning(f"🚫 Uitgesloten (trefwoord): {len(excluded)}")
 
-
     # Berekening
     results = []
     loc_dict = {
@@ -244,6 +243,9 @@ if files:
         for _, r in loc_exceptions.iterrows()
         if pd.notna(r["locatienummer"])
     }
+
+    # ✅ NIEUW: Dedup voor per_stop leveranciers: max 1x per (Ophaaldatum, Locatienummer)
+    seen_per_stop = set()
 
     for _, row in data.iterrows():
         supplier = selected_supplier.lower()
@@ -271,7 +273,6 @@ if files:
             if status == "voltooid" and loc in loc_dict:
                 bedrag += loc_dict[loc]
 
-
         elif supplier == "visser assen":
             info = match_price(row, pricing_editor, selected_supplier)
             prijs = info["prijs"]
@@ -292,22 +293,39 @@ if files:
         if status in ("gepland", "geannuleerd", "discussie"):
             bedrag = 0.0
 
-        # 2) Verantwoordelijke partij 'Partner' → altijd 0 (behalve als het al op Gepland 0 stond, maar dat is hetzelfde)
+        # 2) Verantwoordelijke partij 'Partner' → altijd 0
         elif verantwoordelijke == "partner":
             bedrag = 0.0
 
         # 3) Verantwoordelijke partij 'Client' of 'MSN' en bedrag is nu 0,
         #    maar er is WEL een prijs → alsnog 1x uitbetalen
         elif verantwoordelijke in ("client", "msn") and bedrag == 0 and prijs > 0:
-            # we forceren 1 eenheid uitbetaling
             bedrag = prijs
+
+        # ✅ NIEUW: Deduplicatie voor per_stop leveranciers (Recycling-Continue, Gianluca, Revema, Gogogo)
+        # Doel: dezelfde Locatienummer + dezelfde Ophaaldatum niet 2x de stop-fee betalen.
+        if supplier in ("recycling-continue", "gianluca", "revema", "gogogo"):
+            loc_key = normalize_loc(row.get("Locatienummer", ""))
+
+            ophaal_raw = row.get("Ophaaldatum", None)
+            ophaal_dt = pd.to_datetime(ophaal_raw, errors="coerce")
+            dag_key = ophaal_dt.date().isoformat() if pd.notna(ophaal_dt) else str(ophaal_raw).strip()
+
+            stop_key = (dag_key, loc_key)
+
+            # Alleen dedupen op de "stop-fee" (bedrag == prijs) en alleen als er echt betaald zou worden
+            if bedrag > 0 and prijs > 0 and abs(bedrag - prijs) < 1e-9:
+                if stop_key in seen_per_stop:
+                    bedrag = 0.0
+                else:
+                    seen_per_stop.add(stop_key)
 
         results.append({
             **{c: row.get(c, None) for c in CANON_COLS if c in data.columns},
             "Prijs per stuk": prijs,
             "Bedrag": bedrag
         })
-    
+
     out = pd.DataFrame(results)
 
     # Export
@@ -336,12 +354,23 @@ if files:
         # Totaalregel
         last_row = len(out_export) + 2
         bedrag_col = out_export.columns.get_loc("BEDRAG")
-        worksheet.write(f"{chr(65 + bedrag_col - 1)}{last_row}", "Totaal te ontvangen bedrag")
-        formula = f"SOM({chr(65 + bedrag_col)}2:{chr(65 + bedrag_col)}{last_row-1})"
-        worksheet.write_array_formula(
-            f"{chr(65 + bedrag_col)}{last_row}:{chr(65 + bedrag_col)}{last_row}",
-            f"={formula}"
-        )
+
+        # Label links van bedragkolom (veilig voor kolom A)
+        label_col_idx = max(bedrag_col - 1, 0)
+        def excel_col(n):
+            s = ""
+            n += 1
+            while n:
+                n, r = divmod(n - 1, 26)
+                s = chr(65 + r) + s
+            return s
+
+        label_cell = f"{excel_col(label_col_idx)}{last_row}"
+        bedrag_cell = f"{excel_col(bedrag_col)}{last_row}"
+        bedrag_range = f"{excel_col(bedrag_col)}2:{excel_col(bedrag_col)}{last_row-1}"
+
+        worksheet.write(label_cell, "Totaal te ontvangen bedrag")
+        worksheet.write_array_formula(f"{bedrag_cell}:{bedrag_cell}", f"=SOM({bedrag_range})")
 
     buf.seek(0)
 
