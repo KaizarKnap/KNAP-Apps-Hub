@@ -115,7 +115,8 @@ def period_picker(label: str, key_prefix: str) -> str:
 
 # ---------------- DB init ----------------
 def init_db():
-    conn = get_conn()
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn.execute("PRAGMA foreign_keys = ON;")
     cur = conn.cursor()
     cur.executescript("""
     CREATE TABLE IF NOT EXISTS mop_type (
@@ -186,6 +187,7 @@ def init_db():
     """)
     conn.commit()
     conn.close()
+
 
 def ensure_fixed_mop_types(conn, user: str):
     for name in MOP_FIXED:
@@ -1011,5 +1013,3 @@ with tab_history:
             file_name=f"ton_opbrengst_run_{run_id}_{ym_str(runs.loc[runs['id']==run_id,'period'].values[0])}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
-
-conn.close()
