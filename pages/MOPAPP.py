@@ -67,6 +67,7 @@ def first_day_of_month(year: int, month: int) -> str:
 def ym_str(d: str) -> str:
     return d[:7]
 
+@st.cache_resource
 def get_conn():
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     conn.execute("PRAGMA foreign_keys = ON;")
@@ -756,8 +757,29 @@ with tab_customers:
     overview = pd.DataFrame(rows)
 
     st.markdown("#### Overzicht")
-    show_cols = ["Locatienummer", "Klantnaam", "Actief", "Type MOP", "Afslag (EUR/ton)", "Geldig vanaf", "Geldig tot", "Opmerking"]
-    st.dataframe(overview[show_cols], use_container_width=True, hide_index=True)
+
+    show_cols = [
+        "Locatienummer", "Klantnaam", "Actief", "Type MOP",
+        "Afslag (EUR/ton)", "Geldig vanaf", "Geldig tot", "Opmerking"
+    ]
+
+    if overview is None:
+        st.error("overview is None (niet opgebouwd).")
+        st.stop()
+
+    # Zorg dat overview altijd een DataFrame is met (minimaal) deze kolommen
+    for c in show_cols + ["customer_id", "Afspraak ID"]:
+        if c not in overview.columns:
+            overview[c] = None
+
+    # Toon waarschuwingen maar crash niet
+    if overview.empty:
+        st.warning("Nog geen klanten in de database. Voeg een klant toe of importeer klanten via Excel.")
+    else:
+        # Selecteer alleen kolommen die er zijn (extra safe)
+        available_cols = [c for c in show_cols if c in overview.columns]
+        st.dataframe(overview[available_cols], use_container_width=True, hide_index=True)
+
 
     st.divider()
 
