@@ -186,8 +186,6 @@ def init_db():
     );
     """)
     conn.commit()
-    conn.close()
-
 
 def ensure_fixed_mop_types(conn, user: str):
     for name in MOP_FIXED:
