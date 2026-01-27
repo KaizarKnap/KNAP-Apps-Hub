@@ -5,8 +5,14 @@ from datetime import datetime, date
 from io import BytesIO
 import re
 from pathlib import Path
+import os
 
-DB_PATH = str(Path("/tmp") / "mop_app.db")
+BASE_DIR = Path(__file__).resolve().parent.parent  # repo root
+
+if os.environ.get("STREAMLIT_SERVER_HEADLESS") == "true":
+    DB_PATH = str(Path("/tmp") / "mop_app.db")
+else:
+    DB_PATH = str(BASE_DIR / "mop_app.db")
 
 MONTHS_NL = {
     "januari": 1, "februari": 2, "maart": 3, "april": 4, "mei": 5, "juni": 6,
