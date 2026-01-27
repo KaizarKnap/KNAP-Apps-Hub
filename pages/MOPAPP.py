@@ -67,7 +67,6 @@ def first_day_of_month(year: int, month: int) -> str:
 def ym_str(d: str) -> str:
     return d[:7]
 
-@st.cache_resource
 def get_conn():
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     conn.execute("PRAGMA foreign_keys = ON;")
