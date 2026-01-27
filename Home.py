@@ -73,6 +73,16 @@ apps = [
         "Gemiddelde gewichten per leverancier berekenen en exporteren",
         "pages/gemiddeldegewichten.py",
     ),
+    (
+        "### ⚖️ MOP APP",
+        "MOP Berekenen",
+        "pages/MOPAPP.py",
+    ),
+    (
+        "### ⚖️ Omwisselkosten checker",
+        "Omwisselkosten analyseren en exporteren",
+        "pages/OMKOAPP.py",
+    ),
 ]
 
 st.write("")
