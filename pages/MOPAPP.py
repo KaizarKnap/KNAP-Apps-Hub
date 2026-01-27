@@ -4,8 +4,9 @@ import sqlite3
 from datetime import datetime, date
 from io import BytesIO
 import re
+from pathlib import Path
 
-DB_PATH = "mop_app.db"
+DB_PATH = str(Path("/tmp") / "mop_app.db")
 
 MONTHS_NL = {
     "januari": 1, "februari": 2, "maart": 3, "april": 4, "mei": 5, "juni": 6,
