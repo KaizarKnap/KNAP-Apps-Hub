@@ -17,15 +17,15 @@ CANON_COLS = [
 
 # Standaard tarieven per leverancier
 DEFAULT_PRICING_ALL = pd.DataFrame([
-    {"leverancier": "Recycling-Continue", "tarieftype": "per_stop", "prijs": 3.94, "afvalstroom": ""},
-    {"leverancier": "Gianluca",            "tarieftype": "per_stop", "prijs": 3.95, "afvalstroom": ""},
+    {"leverancier": "Recycling-Continue", "tarieftype": "per_stop", "prijs": 4.00, "afvalstroom": ""},
+    {"leverancier": "Gianluca",            "tarieftype": "per_stop", "prijs": 4.15, "afvalstroom": ""},
     {"leverancier": "Revema",              "tarieftype": "per_stop", "prijs": 4.00, "afvalstroom": ""},
     {"leverancier": "Gogogo",              "tarieftype": "per_stop", "prijs": 3.00, "afvalstroom": ""},
     {"leverancier": "Papierhandel Jansen", "tarieftype": "per_kiep", "prijs": 3.50, "afvalstroom": ""},
     {"leverancier": "Visser Assen",        "tarieftype": "per_kiep", "prijs": 4.00,  "afvalstroom": "Papier/Karton"},
     {"leverancier": "Visser Assen",        "tarieftype": "per_kiep", "prijs": 12.50, "afvalstroom": "Vertrouwelijk papier"},
     {"leverancier": "Schuman",             "tarieftype": "per_kiep", "prijs": 0.00,  "afvalstroom": ""},
-    {"leverancier": "Van Bruchem",         "tarieftype": "per_kiep", "prijs": 0.00,  "afvalstroom": ""}
+    {"leverancier": "Van Bruchem",         "tarieftype": "per_kiep", "prijs": 4.00,  "afvalstroom": ""}
 ])
 
 SUPPLIERS = [
@@ -35,22 +35,22 @@ SUPPLIERS = [
 
 # Schuman prijs-matrix (Volume, Afvalstroom)
 SCHUMAN_PRICES = {
-    ("240L", "Restafval"): 8.50,
-    ("240L", "Papier/Karton"): 4.70,
-    ("360L", "Restafval"): 11.50,
-    ("360L", "Papier/Karton"): 4.70,
-    ("500L", "Restafval"): 12.50,
-    ("660L", "Restafval"): 15.50,
-    ("660L", "Papier/Karton"): 4.70,
-    ("750L", "Restafval"): 17.50,
-    ("770L", "Restafval"): 17.50,
-    ("770L", "Papier/Karton"): 4.70,
-    ("1100L", "Restafval"): 22.50,
-    ("1100L", "Papier/Karton"): 4.70,
-    ("1600L", "Papier/Karton"): 4.70,
-    ("1700L", "Papier/Karton"): 4.70,
-    ("2400L", "Papier/Karton"): 4.70,
-    ("-","Papier/Karton"): 55.00,
+("240L", "Restafval"): 8.93,        
+("240L", "Papier/Karton"): 4.70,
+("360L", "Restafval"): 12.08,      
+("360L", "Papier/Karton"): 4.70,
+("500L", "Restafval"): 13.13,     
+("660L", "Restafval"): 16.28,      
+("660L", "Papier/Karton"): 4.70,
+("750L", "Restafval"): 18.38,     
+("770L", "Restafval"): 18.38,      
+("770L", "Papier/Karton"): 4.70,
+("1100L", "Restafval"): 23.63,    
+("1100L", "Papier/Karton"): 4.70,
+("1600L", "Papier/Karton"): 4.70,
+("1700L", "Papier/Karton"): 4.70,
+("2400L", "Papier/Karton"): 4.70,
+("-", "Papier/Karton"): 55.00,
 }
 
 # Helperfuncties
@@ -167,15 +167,15 @@ if selected_supplier.lower() == "gianluca":
     st.subheader("Uitzonderingen / handelingskosten")
     st.markdown("Locatienummers hieronder krijgen standaard €15 handelingskosten.")
     default_locs = pd.DataFrame([
-        {"locatienummer": "473810001", "handelingskosten": 15.00},
-        {"locatienummer": "2009100001", "handelingskosten": 15.00},
-        {"locatienummer": "424980001", "handelingskosten": 15.00},
-        {"locatienummer": "590930002", "handelingskosten": 15.00},
-        {"locatienummer": "339960001", "handelingskosten": 15.00},
-        {"locatienummer": "505660001", "handelingskosten": 15.00},
-        {"locatienummer": "603760001", "handelingskosten": 15.00},
-        {"locatienummer": "620640001", "handelingskosten": 15.00},
-        {"locatienummer": "612540001", "handelingskosten": 15.00},
+        {"locatienummer": "473810001", "handelingskosten": 15.61},
+        {"locatienummer": "2009100001", "handelingskosten": 15.61},
+        {"locatienummer": "424980001", "handelingskosten": 15.61},
+        {"locatienummer": "590930002", "handelingskosten": 15.61},
+        {"locatienummer": "339960001", "handelingskosten": 15.61},
+        {"locatienummer": "505660001", "handelingskosten": 15.61},
+        {"locatienummer": "603760001", "handelingskosten": 15.61},
+        {"locatienummer": "620640001", "handelingskosten": 15.61},
+        {"locatienummer": "612540001", "handelingskosten": 15.61},
     ])
     loc_exceptions = st.data_editor(default_locs, use_container_width=True, num_rows="dynamic", key="loc_exceptions_editor")
 else:
