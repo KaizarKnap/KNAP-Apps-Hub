@@ -74,7 +74,6 @@ DEFAULT_RULES = {
     "rule_vanbruchem_add_kg_row": True,
 }
 
-# trefwoorden (globaal definieerbaar, selectie per leverancier)
 DEFAULT_KEYWORDS = ["balen", "zakken", "afzet", "pers"]
 
 # -------------------- HELPERS --------------------
@@ -162,7 +161,9 @@ def match_price(row, pricing_df, supplier):
         r = df.iloc[0]
         return {"tarieftype": r["tarieftype"], "prijs": float(r["prijs"])}
 
-    return {"tarieftype": "per_stop", "prijs": 0.0}
+    return {"tarieftype": "per_stop", "prijs": 0.0
+
+}
 
 def get_kg_value(row, df):
     candidates = []
@@ -219,7 +220,6 @@ def export_excel_bytes(out_df: pd.DataFrame) -> bytes:
     return buf.getvalue()
 
 def apply_product_filter(data: pd.DataFrame, product_col: str, allowed_products: set | None) -> pd.DataFrame:
-    """Filtert data op Productomschrijving allowlist. Als None: niets doen."""
     if allowed_products is None or not product_col:
         return data
     return data[data[product_col].astype(str).isin(allowed_products)].copy()
@@ -242,13 +242,11 @@ def process_supplier(
     if data.empty:
         return pd.DataFrame()
 
-    # per leverancier productfilter toepassen (indien aanwezig)
     product_col = next((c for c in data.columns if "productomschrijving" in str(c).lower()), None)
     data = apply_product_filter(data, product_col, allowed_products)
     if data.empty:
         return pd.DataFrame()
 
-    # exceptions dict voor Gianluca
     loc_dict = {}
     if supplier == "gianluca" and rules.get("rule_gianluca_handlingskosten", True):
         loc_dict = {
@@ -275,7 +273,6 @@ def process_supplier(
             and (afst_norm == "Papier/Karton")
         )
 
-        # ---------- prijsberekening ----------
         if supplier == "schuman":
             ttype = "per_kiep"
             volume = normalize_volume(row.get(vol_col, "")) if vol_col else ""
@@ -318,7 +315,6 @@ def process_supplier(
             qty = units_from_row(row, info["tarieftype"])
             bedrag = prijs if info["tarieftype"] == "per_stop" and qty > 0 else prijs * qty
 
-        # ---------- status/verantwoordelijke regels ----------
         verantwoordelijke = str(row.get("Verantwoordelijke partij", "")).strip().lower()
         status = str(row.get("Status", "")).strip().lower()
 
@@ -329,7 +325,6 @@ def process_supplier(
         elif rules.get("rule_client_msn_minpay", True) and verantwoordelijke in ("client", "msn") and bedrag == 0 and prijs > 0:
             bedrag = prijs
 
-        # ---------- dedup per_stop ----------
         if rules.get("rule_dedup_per_stop", True) and supplier in ("recycling-continue", "gianluca", "revema", "gogogo"):
             loc_key = normalize_loc(row.get("Locatienummer", ""))
 
@@ -345,20 +340,18 @@ def process_supplier(
                 else:
                     seen_per_stop.add(stop_key)
 
-        # ---------- base row (Kilogram altijd leeg, ook op persregel) ----------
         base_row = {
             **{c: row.get(c, None) for c in CANON_COLS if c in data.columns},
-            "Kilogram": None,
+            "Kilogram": None,  # ALTIJD leeg op normale regels en persregels
             "Prijs per stuk": prijs,
             "Bedrag": bedrag
         }
         results.append(base_row)
 
-        # ---------- extra kilogram-regel onder persregel ----------
         if supplier == "van bruchem" and rules.get("rule_vanbruchem_add_kg_row", True) and is_vanbruchem_pers_23_pk:
             kg_row = {
                 **{c: row.get(c, None) for c in CANON_COLS if c in data.columns},
-                "Kilogram": get_kg_value(row, data),
+                "Kilogram": get_kg_value(row, data),  # ALLEEN op kilogram-regel gevuld
                 "Productomschrijving": "Kilogrammen opgehaald met pers (23m3)",
                 "Prijs per stuk": 0.0,
                 "Bedrag": 0.0
@@ -375,7 +368,7 @@ mode = st.radio(
 )
 process_all = (mode != "1 leverancier")
 
-# Keywords (globaal), selectie per leverancier
+# -------------------- UI: KEYWORDS --------------------
 st.subheader("Trefwoorden (voor productomschrijvingen)")
 kw_text = st.text_input(
     "Trefwoorden (komma-gescheiden)",
@@ -483,36 +476,55 @@ if not supplier_col:
 
 product_col_all = next((c for c in data_all.columns if "productomschrijving" in str(c).lower()), None)
 
-# -------------------- PRODUCT FILTERS: PER LEVERANCIER IN BULK --------------------
+# -------------------- PRODUCT FILTERS: PER LEVERANCIER (TOGGLES) --------------------
 allowed_products_by_supplier: dict[str, set | None] = {}
 
-def build_allowed_products_for_supplier(df_sup: pd.DataFrame, keywords: list[str]) -> set | None:
-    """Bouwt allowlist: alles zonder trefwoord + door gebruiker geselecteerde trefwoord-items."""
+def compute_allowed_products_toggles(df_sup: pd.DataFrame, supplier_name: str) -> set | None:
+    """
+    Build allowlist using toggles for impacted products.
+    - unaffected always included
+    - impacted included only if toggle is ON
+    """
     if product_col_all is None:
+        st.info("Geen kolom ‘Productomschrijving’ gevonden. Er wordt niet gefilterd.")
         return None
+
     products_all = sorted(df_sup[product_col_all].dropna().astype(str).unique().tolist())
     if not products_all:
+        st.info("Geen productomschrijvingen gevonden. Er wordt niet gefilterd.")
         return None
 
-    impacted = [p for p in products_all if any(k in p.lower() for k in keywords)]
+    impacted = [p for p in products_all if any(k in p.lower() for k in KEYWORDS)]
     unaffected = [p for p in products_all if p not in impacted]
 
-    # UI selectie (bulk): multiselect = alle impacted standaard aan
-    selected_impacted = st.multiselect(
-        "Beoordeel productomschrijvingen met trefwoord (alles zonder trefwoord gaat altijd mee)",
-        options=impacted,
-        default=impacted,
-        key=f"impacted_{hash(tuple(impacted))}_{df_sup.shape[0]}_{len(keywords)}_{products_all[0] if products_all else ''}"
-    )
+    st.write(f"🔎 Gevonden **{len(impacted)}** met trefwoord en **{len(unaffected)}** zonder trefwoord.")
+    st.caption("Alles zonder trefwoord gaat altijd mee. Zet hieronder alleen trefwoord-regels aan/uit.")
 
-    return set(unaffected) | set(selected_impacted)
+    active_impacted = []
+
+    if impacted:
+        cols = st.columns(2)
+        for i, prod in enumerate(impacted):
+            # sleutel stabiel per leverancier + product
+            key = f"tgl_{supplier_name}_{hash(prod)}"
+            with cols[i % 2]:
+                if st.toggle(prod, value=True, key=key):
+                    active_impacted.append(prod)
+
+    allowed = set(unaffected) | set(active_impacted)
+
+    excluded = set(impacted) - set(active_impacted)
+    st.success(f"✅ Meegenomen: {len(allowed)} productomschrijvingen (waarvan {len(active_impacted)} met trefwoord).")
+    if excluded:
+        st.warning(f"🚫 Uitgesloten (trefwoord): {len(excluded)}")
+
+    return allowed
 
 if process_all:
     st.subheader("🧩 Productomschrijvingen per leverancier (bulk)")
-    st.caption("Per leverancier kun je alleen de productomschrijvingen mét trefwoord aan/uit zetten. Alles zonder trefwoord gaat altijd mee.")
+    st.caption("Per leverancier kun je alleen de productomschrijvingen mét trefwoord aan/uit zetten.")
 
     present_suppliers = [s for s in SUPPLIERS if data_all[supplier_col].astype(str).str.lower().str.contains(s.lower()).any()]
-
     if not present_suppliers:
         st.warning("Geen bekende leveranciers gevonden in dit bestand.")
         st.stop()
@@ -520,53 +532,12 @@ if process_all:
     for s in present_suppliers:
         df_sup = data_all[data_all[supplier_col].astype(str).str.lower().str.contains(s.lower())].copy()
         with st.expander(f"Productomschrijvingen: {s}", expanded=False):
-            if product_col_all is None:
-                st.info("Geen kolom ‘Productomschrijving’ gevonden. Er wordt niet gefilterd.")
-                allowed_products_by_supplier[s] = None
-            else:
-                # Bouw allowlist via multiselect
-                products_all = sorted(df_sup[product_col_all].dropna().astype(str).unique().tolist())
-                if not products_all:
-                    st.info("Geen productomschrijvingen gevonden. Er wordt niet gefilterd.")
-                    allowed_products_by_supplier[s] = None
-                else:
-                    impacted = [p for p in products_all if any(k in p.lower() for k in KEYWORDS)]
-                    unaffected = [p for p in products_all if p not in impacted]
-                    st.write(f"🔎 {len(impacted)} met trefwoord, {len(unaffected)} zonder trefwoord.")
-
-                    selected_impacted = st.multiselect(
-                        "Selecteer welke trefwoord-producten je meeneemt",
-                        options=impacted,
-                        default=impacted,
-                        key=f"prodsel_{s}"
-                    )
-                    allowed_products_by_supplier[s] = set(unaffected) | set(selected_impacted)
+            allowed_products_by_supplier[s] = compute_allowed_products_toggles(df_sup, supplier_name=s)
 
 else:
-    # single supplier: eenvoudige selectie zoals eerder (multiselect ook prima)
     st.subheader("🧩 Productomschrijvingen (geselecteerde leverancier)")
     df_sup = data_all[data_all[supplier_col].astype(str).str.lower().str.contains(selected_supplier.lower())].copy()
-
-    if product_col_all is None:
-        st.info("Geen kolom ‘Productomschrijving’ gevonden. Er wordt niet gefilterd.")
-        allowed_products_by_supplier[selected_supplier] = None
-    else:
-        products_all = sorted(df_sup[product_col_all].dropna().astype(str).unique().tolist())
-        if not products_all:
-            st.info("Geen productomschrijvingen gevonden. Er wordt niet gefilterd.")
-            allowed_products_by_supplier[selected_supplier] = None
-        else:
-            impacted = [p for p in products_all if any(k in p.lower() for k in KEYWORDS)]
-            unaffected = [p for p in products_all if p not in impacted]
-            st.write(f"🔎 {len(impacted)} met trefwoord, {len(unaffected)} zonder trefwoord.")
-
-            selected_impacted = st.multiselect(
-                "Selecteer welke trefwoord-producten je meeneemt",
-                options=impacted,
-                default=impacted,
-                key="prodsel_single"
-            )
-            allowed_products_by_supplier[selected_supplier] = set(unaffected) | set(selected_impacted)
+    allowed_products_by_supplier[selected_supplier] = compute_allowed_products_toggles(df_sup, supplier_name=selected_supplier)
 
 # -------------------- RUN --------------------
 if process_all:
