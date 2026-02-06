@@ -1,11 +1,11 @@
 import io
+import zipfile
 import pandas as pd
 import streamlit as st
 
 # GEEN st.set_page_config hier (dat gebeurt in Home.py)
 st.title("🧾 Self-billing per leverancier")
 st.caption("Upload leveranciers-Excel(s), bereken automatisch de self-billing en exporteer het resultaat.")
-
 
 # Canonieke kolommen (met Kilogram naast Gepland)
 CANON_COLS = [
@@ -54,8 +54,20 @@ SCHUMAN_PRICES = {
     ("-", "Papier/Karton"): 55.00,
 }
 
+# Gianluca default exceptions
+DEFAULT_GIANLUCA_LOCS = pd.DataFrame([
+    {"locatienummer": "473810001", "handelingskosten": 15.61},
+    {"locatienummer": "2009100001", "handelingskosten": 15.61},
+    {"locatienummer": "424980001", "handelingskosten": 15.61},
+    {"locatienummer": "590930002", "handelingskosten": 15.61},
+    {"locatienummer": "339960001", "handelingskosten": 15.61},
+    {"locatienummer": "505660001", "handelingskosten": 15.61},
+    {"locatienummer": "603760001", "handelingskosten": 15.61},
+    {"locatienummer": "620640001", "handelingskosten": 15.61},
+    {"locatienummer": "612540001", "handelingskosten": 15.61},
+])
 
-# Helperfuncties
+# ---------- Helpers ----------
 @st.cache_data(show_spinner=False)
 def read_excel(file):
     """Leest Excel in, detecteert header en normaliseert kolomnamen."""
@@ -66,10 +78,8 @@ def read_excel(file):
     header_index = header_row.idxmax() if header_row.any() else 0
     df = pd.read_excel(file, header=header_index)
 
-    # Normaliseer kolomnamen
     df.columns = [str(c).strip().replace("\u00A0", " ") for c in df.columns]
 
-    # Kolom-aliases
     alias_map = {
         "# uitgevoerd": "Uitgevoerd",
         "# gepland": "Gepland",
@@ -86,13 +96,11 @@ def read_excel(file):
 
     return df
 
-
 def get_col(df, hint):
     for c in df.columns:
         if hint.lower() in str(c).lower():
             return c
     return None
-
 
 def normalize_afvalstroom(v):
     v = str(v).strip().lower().replace(" ", "")
@@ -104,26 +112,26 @@ def normalize_afvalstroom(v):
         return "Vertrouwelijk papier"
     return v
 
-
 def normalize_volume(v):
     v = str(v).strip().upper().replace(" ", "")
     if v.isdigit() and not v.endswith("L"):
         v += "L"
     return v
 
-
-# ✅ NIEUW: ook m3 varianten normaliseren (voor pers 23m3)
 def normalize_volume_any(v):
-    """
-    Normaliseert zowel L (vaten) als m3 (pers/containers) naar vaste notatie.
-    Voorbeeld: '23m3' -> '23M3', '1100' -> '1100L'
-    """
     s = str(v).strip().upper().replace(" ", "")
     if s.isdigit():
         return s + "L"
     s = s.replace("M³", "M3")
     return s
 
+def normalize_loc(l):
+    if l is None:
+        return ""
+    s = str(l).strip()
+    if s.endswith(".0"):
+        s = s[:-2]
+    return s
 
 def units_from_row(row, tarieftype):
     val = row.get("Uitgevoerd", 0)
@@ -134,150 +142,105 @@ def units_from_row(row, tarieftype):
             return 1 if str(val).strip() else 0
     return 1 if str(val).strip() else 0
 
-
 def match_price(row, pricing_df, supplier):
     afst = str(row.get("Afvalstroom", "")).strip()
     df = pricing_df[pricing_df["leverancier"].str.lower().str.contains(supplier.lower())]
 
     if supplier.lower() == "visser assen":
         for _, r in df.iterrows():
-            if str(r["afvalstroom"]).lower() == str(afst).lower():
-                return {"tarieftype": "per_kiep", "prijs": r["prijs"]}
+            if str(r.get("afvalstroom","")).lower() == str(afst).lower():
+                return {"tarieftype": "per_kiep", "prijs": float(r["prijs"])}
 
     if not df.empty:
         r = df.iloc[0]
-        return {"tarieftype": r["tarieftype"], "prijs": r["prijs"]}
+        return {"tarieftype": r["tarieftype"], "prijs": float(r["prijs"])}
 
     return {"tarieftype": "per_stop", "prijs": 0.0}
 
-
-def normalize_loc(l):
-    """Zorgt dat locatienummers altijd uniform zijn, ongeacht type of notatie."""
-    if l is None:
-        return ""
-    s = str(l).strip()
-    if s.endswith(".0"):
-        s = s[:-2]
-    return s
-
-
 def get_kg_value(row, df):
-    """
-    Probeert een gewicht/kg kolom te vinden en geeft de waarde terug.
-    """
     candidates = []
     for c in df.columns:
         cl = str(c).lower().strip()
         if "gewicht" in cl or cl == "kg" or "kilo" in cl:
             candidates.append(c)
-
     for c in candidates:
         v = row.get(c, None)
         if pd.notna(v) and str(v).strip() != "":
             return v
     return None
 
+def export_excel_bytes(out_df: pd.DataFrame) -> bytes:
+    out_export = out_df.copy()
+    out_export.columns = [c.upper() for c in out_export.columns]
 
-# UI
-selected_supplier = st.selectbox("Kies leverancier:", SUPPLIERS)
-st.info(f"Berekening en export gelden alleen voor **{selected_supplier}**.")
+    if "OPHAALDATUM" in out_export.columns:
+        out_export["OPHAALDATUM"] = pd.to_datetime(out_export["OPHAALDATUM"], errors="coerce").dt.strftime("%d-%m-%Y")
 
-# Tarieven + Schuman-tabel
-st.subheader("Tarieven voor geselecteerde leverancier")
-view = DEFAULT_PRICING_ALL[
-    DEFAULT_PRICING_ALL["leverancier"].str.lower().str.contains(selected_supplier.lower())
-].reset_index(drop=True)
-pricing_editor = st.data_editor(view, use_container_width=True, num_rows="dynamic", key="pricing_editor")
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="xlsxwriter") as writer:
+        out_export.to_excel(writer, index=False, sheet_name="SelfBilling")
+        worksheet = writer.sheets["SelfBilling"]
 
-if selected_supplier.lower() == "schuman":
-    st.markdown("Prijstabel Schuman")
-    st.dataframe(
-        pd.DataFrame(
-            [{"Volume": v[0], "Afvalstroom": v[1], "Prijs (€)": p} for v, p in SCHUMAN_PRICES.items()]
-        ),
-        use_container_width=True,
-    )
+        # kolombreedtes
+        for idx, col in enumerate(out_export.columns):
+            try:
+                max_len = min(max(out_export[col].astype(str).map(len).max(), len(col)) + 2, 30)
+            except Exception:
+                max_len = min(len(col) + 2, 30)
+            worksheet.set_column(idx, idx, max_len)
 
-# Uitzonderingen (alleen Gianluca)
-if selected_supplier.lower() == "gianluca":
-    st.subheader("Uitzonderingen / handelingskosten")
-    st.markdown("Locatienummers hieronder krijgen standaard €15 handelingskosten.")
-    default_locs = pd.DataFrame([
-        {"locatienummer": "473810001", "handelingskosten": 15.61},
-        {"locatienummer": "2009100001", "handelingskosten": 15.61},
-        {"locatienummer": "424980001", "handelingskosten": 15.61},
-        {"locatienummer": "590930002", "handelingskosten": 15.61},
-        {"locatienummer": "339960001", "handelingskosten": 15.61},
-        {"locatienummer": "505660001", "handelingskosten": 15.61},
-        {"locatienummer": "603760001", "handelingskosten": 15.61},
-        {"locatienummer": "620640001", "handelingskosten": 15.61},
-        {"locatienummer": "612540001", "handelingskosten": 15.61},
-    ])
-    loc_exceptions = st.data_editor(default_locs, use_container_width=True, num_rows="dynamic", key="loc_exceptions_editor")
-else:
-    loc_exceptions = pd.DataFrame(columns=["locatienummer", "handelingskosten"])
+        # totaalregel
+        last_row = len(out_export) + 2
+        if "BEDRAG" in out_export.columns:
+            bedrag_col = out_export.columns.get_loc("BEDRAG")
+            label_col_idx = max(bedrag_col - 1, 0)
 
-# Upload bestanden en bereken
-st.subheader("Upload leveranciers-Excel(s)")
-files = st.file_uploader("Selecteer Excel-bestanden", type=["xlsx", "xls"], accept_multiple_files=True)
+            def excel_col(n):
+                s = ""
+                n += 1
+                while n:
+                    n, r = divmod(n - 1, 26)
+                    s = chr(65 + r) + s
+                return s
 
-if files:
-    frames = [read_excel(f) for f in files]
-    data = pd.concat(frames, ignore_index=True)
+            label_cell = f"{excel_col(label_col_idx)}{last_row}"
+            bedrag_cell = f"{excel_col(bedrag_col)}{last_row}"
+            bedrag_range = f"{excel_col(bedrag_col)}2:{excel_col(bedrag_col)}{last_row-1}"
 
-    supplier_col = get_col(data, "leverancier")
-    mask = data[supplier_col].astype(str).str.lower().str.contains(selected_supplier.lower()) if supplier_col else [True] * len(data)
-    data = data[mask].copy()
+            worksheet.write(label_cell, "Totaal te ontvangen bedrag")
+            worksheet.write_array_formula(f"{bedrag_cell}:{bedrag_cell}", f"=SOM({bedrag_range})")
 
-    # 🧩 Productomschrijvingen – alleen regels met trefwoord beoordelen
-    st.subheader("🧩 Productomschrijvingen")
-    st.caption("Alle regels gaan standaard mee. Alleen productomschrijvingen met een trefwoord kun je hieronder (de)activeren.")
+    buf.seek(0)
+    return buf.getvalue()
 
-    product_col = next((c for c in data.columns if "productomschrijving" in str(c).lower()), None)
-    products_all = sorted(data[product_col].dropna().astype(str).unique().tolist()) if product_col else []
+def process_supplier(data_all: pd.DataFrame, supplier_name: str, pricing_df: pd.DataFrame, gianluca_exceptions: pd.DataFrame) -> pd.DataFrame:
+    """
+    Maakt output voor 1 leverancier.
+    - Van Bruchem: pers 23m3 Papier/Karton = €92 (alleen als uitgevoerd) + extra kilogramregel eronder (bedrag 0)
+    - Kilogram kolom: alleen gevuld op kilogramregels (dus niet op persregel)
+    """
+    supplier = supplier_name.lower()
 
-    keywords = ["balen", "zakken", "afzet", "pers"]  # pas aan naar wens
+    supplier_col = get_col(data_all, "leverancier")
+    if not supplier_col:
+        return pd.DataFrame()
 
-    impacted = [p for p in products_all if any(k in p.lower() for k in keywords)]
-    unaffected = [p for p in products_all if p not in impacted]
+    data = data_all[data_all[supplier_col].astype(str).str.lower().str.contains(supplier)].copy()
+    if data.empty:
+        return pd.DataFrame()
 
-    if not product_col or not products_all:
-        st.info("Geen kolom ‘Productomschrijving’ gevonden of geen waarden. Alles wordt meegenomen.")
-    else:
-        st.write(f"🔎 Gevonden **{len(impacted)}** productomschrijvingen met trefwoord en **{len(unaffected)}** zonder trefwoord.")
-
-        active_impacted = []
-        if impacted:
-            st.markdown("**Beoordeel productomschrijvingen met trefwoord:**")
-            cols = st.columns(2)
-            for i, prod in enumerate(impacted):
-                with cols[i % 2]:
-                    if st.toggle(prod, value=True, key=f"kwprod_{i}"):
-                        active_impacted.append(prod)
-
-        active_products = set(unaffected) | set(active_impacted)
-        data = data[data[product_col].astype(str).isin(active_products)]
-
-        excluded = set(impacted) - set(active_impacted)
-        st.success(f"✅ Meegenomen: {len(active_products)} productomschrijvingen "
-                   f"(waarvan {len(active_impacted)} met trefwoord).")
-        if excluded:
-            st.warning(f"🚫 Uitgesloten (trefwoord): {len(excluded)}")
-
-    # Berekening
-    results = []
+    # exceptions dict voor Gianluca
     loc_dict = {
         normalize_loc(r["locatienummer"]): float(r["handelingskosten"])
-        for _, r in loc_exceptions.iterrows()
-        if pd.notna(r["locatienummer"])
+        for _, r in gianluca_exceptions.iterrows()
+        if pd.notna(r.get("locatienummer", None))
     }
 
+    results = []
     seen_per_stop = set()
 
     for _, row in data.iterrows():
-        supplier = selected_supplier.lower()
-
-        # Voor pers-detectie (Van Bruchem)
+        # detectievelden
         product_col_local = next((c for c in data.columns if "productomschrijving" in str(c).lower()), None)
         prod_txt = str(row.get(product_col_local, "")) if product_col_local else ""
         vol_col = get_col(data, "volume")
@@ -292,35 +255,35 @@ if files:
             and (afst_norm == "Papier/Karton")
         )
 
+        # --- prijsberekening ---
         if supplier == "schuman":
             ttype = "per_kiep"
             volume = normalize_volume(row.get(vol_col, "")) if vol_col else ""
             afst = normalize_afvalstroom(row.get(afst_col, "")) if afst_col else ""
-            prijs = SCHUMAN_PRICES.get((volume, afst), 0.0)
+            prijs = float(SCHUMAN_PRICES.get((volume, afst), 0.0))
             qty = units_from_row(row, ttype)
             bedrag = prijs * qty
 
         elif supplier == "gianluca":
-            info = match_price(row, pricing_editor, selected_supplier)
-            prijs = info["prijs"]
+            info = match_price(row, pricing_df, supplier_name)
+            prijs = float(info["prijs"])
             qty = units_from_row(row, info["tarieftype"])
             bedrag = prijs if qty > 0 else 0.0
 
             loc = normalize_loc(row.get("Locatienummer", ""))
-            status = str(row.get("Status", "")).strip().lower()
-
-            if status == "voltooid" and loc in loc_dict:
+            status_txt = str(row.get("Status", "")).strip().lower()
+            if status_txt == "voltooid" and loc in loc_dict:
                 bedrag += loc_dict[loc]
 
         elif supplier == "visser assen":
-            info = match_price(row, pricing_editor, selected_supplier)
-            prijs = info["prijs"]
+            info = match_price(row, pricing_df, supplier_name)
+            prijs = float(info["prijs"])
             qty = units_from_row(row, info["tarieftype"])
             bedrag = prijs * qty
 
         elif supplier == "van bruchem":
-            info = match_price(row, pricing_editor, selected_supplier)
-            prijs = info["prijs"]
+            info = match_price(row, pricing_df, supplier_name)
+            prijs = float(info["prijs"])
             qty = units_from_row(row, info["tarieftype"])
             bedrag = prijs if info["tarieftype"] == "per_stop" and qty > 0 else prijs * qty
 
@@ -330,12 +293,12 @@ if files:
                 bedrag = 92.0
 
         else:
-            info = match_price(row, pricing_editor, selected_supplier)
-            prijs = info["prijs"]
+            info = match_price(row, pricing_df, supplier_name)
+            prijs = float(info["prijs"])
             qty = units_from_row(row, info["tarieftype"])
             bedrag = prijs if info["tarieftype"] == "per_stop" and qty > 0 else prijs * qty
 
-        # Verantwoordelijke partij / status logica
+        # --- status/verantwoordelijke logica ---
         verantwoordelijke = str(row.get("Verantwoordelijke partij", "")).strip().lower()
         status = str(row.get("Status", "")).strip().lower()
 
@@ -346,7 +309,7 @@ if files:
         elif verantwoordelijke in ("client", "msn") and bedrag == 0 and prijs > 0:
             bedrag = prijs
 
-        # Deduplicatie voor per_stop leveranciers
+        # --- dedup per_stop ---
         if supplier in ("recycling-continue", "gianluca", "revema", "gogogo"):
             loc_key = normalize_loc(row.get("Locatienummer", ""))
 
@@ -362,7 +325,7 @@ if files:
                 else:
                     seen_per_stop.add(stop_key)
 
-        # ✅ Outputregel (Kilogram altijd LEEG op normale regels, inclusief persregel)
+        # --- base row: Kilogram altijd leeg ---
         base_row = {
             **{c: row.get(c, None) for c in CANON_COLS if c in data.columns},
             "Kilogram": None,
@@ -371,7 +334,7 @@ if files:
         }
         results.append(base_row)
 
-        # ✅ EXTRA: Kilogram-regel direct onder persregel (hier komt Kilogram WÉL gevuld)
+        # --- extra KG regel direct onder persregel ---
         if is_vanbruchem_pers_23_pk:
             kg_row = {
                 **{c: row.get(c, None) for c in CANON_COLS if c in data.columns},
@@ -382,60 +345,181 @@ if files:
             }
             results.append(kg_row)
 
-    out = pd.DataFrame(results)
+    return pd.DataFrame(results)
 
-    # Export
-    st.subheader("Bekijk en exporteer resultaat")
-    st.dataframe(out.head(40), use_container_width=True)
+# ---------- UI ----------
+process_all = st.checkbox("✅ Verwerk alle leveranciers tegelijk (maak per leverancier een Excel)", value=False)
 
-    out_export = out.copy()
-    out_export.columns = [c.upper() for c in out_export.columns]
+# Pricing editor(s)
+st.subheader("Tarieven")
+st.caption("In ‘alle leveranciers’-modus kun je per leverancier tarieven aanpassen in de uitklappers hieronder.")
 
-    if "OPHAALDATUM" in out_export.columns:
-        out_export["OPHAALDATUM"] = pd.to_datetime(out_export["OPHAALDATUM"], errors="coerce").dt.strftime("%d-%m-%Y")
+pricing_by_supplier = {}
+gianluca_exceptions = DEFAULT_GIANLUCA_LOCS.copy()
 
-    # Exporteer naar Excel met opmaak
-    buf = io.BytesIO()
-    with pd.ExcelWriter(buf, engine="xlsxwriter") as writer:
-        out_export.to_excel(writer, index=False, sheet_name="SelfBilling")
+if process_all:
+    # per leverancier editor
+    for s in SUPPLIERS:
+        with st.expander(f"Tarieven: {s}", expanded=False):
+            view = DEFAULT_PRICING_ALL[DEFAULT_PRICING_ALL["leverancier"].str.lower().str.contains(s.lower())].reset_index(drop=True)
+            edited = st.data_editor(view, use_container_width=True, num_rows="dynamic", key=f"pricing_{s}")
+            pricing_by_supplier[s] = edited
 
-        workbook = writer.book
-        worksheet = writer.sheets["SelfBilling"]
+        if s.lower() == "schuman":
+            with st.expander("Prijstabel Schuman", expanded=False):
+                st.dataframe(
+                    pd.DataFrame([{"Volume": v[0], "Afvalstroom": v[1], "Prijs (€)": p} for v, p in SCHUMAN_PRICES.items()]),
+                    use_container_width=True,
+                )
 
-        # Kolombreedte automatisch aanpassen
-        for idx, col in enumerate(out_export.columns):
-            max_len = min(max(out_export[col].astype(str).map(len).max(), len(col)) + 2, 30)
-            worksheet.set_column(idx, idx, max_len)
+    with st.expander("Gianluca: uitzonderingen / handelingskosten", expanded=False):
+        st.markdown("Locatienummers hieronder krijgen standaard handelingskosten (alleen bij status VOLTOOID).")
+        gianluca_exceptions = st.data_editor(
+            DEFAULT_GIANLUCA_LOCS, use_container_width=True, num_rows="dynamic", key="gianluca_ex_all"
+        )
 
-        # Totaalregel
-        last_row = len(out_export) + 2
-        bedrag_col = out_export.columns.get_loc("BEDRAG")
+else:
+    selected_supplier = st.selectbox("Kies leverancier:", SUPPLIERS)
+    st.info(f"Berekening en export gelden alleen voor **{selected_supplier}**.")
 
-        label_col_idx = max(bedrag_col - 1, 0)
+    view = DEFAULT_PRICING_ALL[
+        DEFAULT_PRICING_ALL["leverancier"].str.lower().str.contains(selected_supplier.lower())
+    ].reset_index(drop=True)
+    pricing_by_supplier[selected_supplier] = st.data_editor(view, use_container_width=True, num_rows="dynamic", key="pricing_single")
 
-        def excel_col(n):
-            s = ""
-            n += 1
-            while n:
-                n, r = divmod(n - 1, 26)
-                s = chr(65 + r) + s
-            return s
+    if selected_supplier.lower() == "schuman":
+        st.markdown("Prijstabel Schuman")
+        st.dataframe(
+            pd.DataFrame([{"Volume": v[0], "Afvalstroom": v[1], "Prijs (€)": p} for v, p in SCHUMAN_PRICES.items()]),
+            use_container_width=True,
+        )
 
-        label_cell = f"{excel_col(label_col_idx)}{last_row}"
-        bedrag_cell = f"{excel_col(bedrag_col)}{last_row}"
-        bedrag_range = f"{excel_col(bedrag_col)}2:{excel_col(bedrag_col)}{last_row-1}"
+    if selected_supplier.lower() == "gianluca":
+        st.subheader("Uitzonderingen / handelingskosten")
+        st.markdown("Locatienummers hieronder krijgen standaard handelingskosten (alleen bij status VOLTOOID).")
+        gianluca_exceptions = st.data_editor(
+            DEFAULT_GIANLUCA_LOCS, use_container_width=True, num_rows="dynamic", key="gianluca_ex_single"
+        )
+    else:
+        gianluca_exceptions = pd.DataFrame(columns=["locatienummer", "handelingskosten"])
 
-        worksheet.write(label_cell, "Totaal te ontvangen bedrag")
-        worksheet.write_array_formula(f"{bedrag_cell}:{bedrag_cell}", f"=SOM({bedrag_range})")
+# Upload
+st.subheader("Upload leveranciers-Excel(s)")
+files = st.file_uploader("Selecteer Excel-bestanden", type=["xlsx", "xls"], accept_multiple_files=True)
 
-    buf.seek(0)
+if files:
+    frames = [read_excel(f) for f in files]
+    data_all = pd.concat(frames, ignore_index=True)
 
-    st.download_button(
-        label=f"💾 Download self-billing ({selected_supplier}).xlsx",
-        data=buf,
-        file_name=f"selfbilling_{selected_supplier.lower().replace(' ', '_')}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
+    supplier_col = get_col(data_all, "leverancier")
+    if not supplier_col:
+        st.error("Geen kolom gevonden die ‘Leverancier’ bevat. Controleer je Excel.")
+        st.stop()
+
+    # productomschrijving filter (blijft globaal op dataset)
+    st.subheader("🧩 Productomschrijvingen")
+    st.caption("Alle regels gaan standaard mee. Alleen productomschrijvingen met een trefwoord kun je hieronder (de)activeren.")
+
+    product_col = next((c for c in data_all.columns if "productomschrijving" in str(c).lower()), None)
+    products_all = sorted(data_all[product_col].dropna().astype(str).unique().tolist()) if product_col else []
+    keywords = ["balen", "zakken", "afzet", "pers"]
+
+    impacted = [p for p in products_all if any(k in p.lower() for k in keywords)]
+    unaffected = [p for p in products_all if p not in impacted]
+
+    if not product_col or not products_all:
+        st.info("Geen kolom ‘Productomschrijving’ gevonden of geen waarden. Alles wordt meegenomen.")
+        data_filtered = data_all
+    else:
+        st.write(f"🔎 Gevonden **{len(impacted)}** productomschrijvingen met trefwoord en **{len(unaffected)}** zonder trefwoord.")
+        active_impacted = []
+        if impacted:
+            st.markdown("**Beoordeel productomschrijvingen met trefwoord:**")
+            cols = st.columns(2)
+            for i, prod in enumerate(impacted):
+                with cols[i % 2]:
+                    if st.toggle(prod, value=True, key=f"kwprod_{i}"):
+                        active_impacted.append(prod)
+
+        active_products = set(unaffected) | set(active_impacted)
+        data_filtered = data_all[data_all[product_col].astype(str).isin(active_products)].copy()
+
+        excluded = set(impacted) - set(active_impacted)
+        st.success(f"✅ Meegenomen: {len(active_products)} productomschrijvingen (waarvan {len(active_impacted)} met trefwoord).")
+        if excluded:
+            st.warning(f"🚫 Uitgesloten (trefwoord): {len(excluded)}")
+
+    # --------- RUN ----------
+    if process_all:
+        # bepaal welke leveranciers écht voorkomen
+        present_suppliers = []
+        for s in SUPPLIERS:
+            if data_filtered[supplier_col].astype(str).str.lower().str.contains(s.lower()).any():
+                present_suppliers.append(s)
+
+        if not present_suppliers:
+            st.warning("Geen bekende leveranciers gevonden in dit bestand.")
+            st.stop()
+
+        st.subheader("Resultaten per leverancier")
+
+        # maak ZIP
+        zip_buf = io.BytesIO()
+        with zipfile.ZipFile(zip_buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            for s in present_suppliers:
+                pricing_df = pricing_by_supplier.get(
+                    s,
+                    DEFAULT_PRICING_ALL[DEFAULT_PRICING_ALL["leverancier"].str.lower().str.contains(s.lower())].reset_index(drop=True)
+                )
+
+                out_df = process_supplier(
+                    data_all=data_filtered,
+                    supplier_name=s,
+                    pricing_df=pricing_df,
+                    gianluca_exceptions=gianluca_exceptions if s.lower() == "gianluca" else pd.DataFrame(columns=["locatienummer", "handelingskosten"])
+                )
+
+                if out_df.empty:
+                    continue
+
+                st.markdown(f"**{s}** — {len(out_df)} regels")
+                st.dataframe(out_df.head(20), use_container_width=True)
+
+                xbytes = export_excel_bytes(out_df)
+                fname = f"selfbilling_{s.lower().replace(' ', '_')}.xlsx"
+                zf.writestr(fname, xbytes)
+
+        zip_buf.seek(0)
+        st.download_button(
+            label="💾 Download alle self-billings (ZIP)",
+            data=zip_buf.getvalue(),
+            file_name="selfbilling_per_leverancier.zip",
+            mime="application/zip"
+        )
+
+    else:
+        # single supplier mode
+        selected_supplier = st.session_state.get("Kies leverancier:", None)  # safety (Streamlit key)
+        # maar we hebben selected_supplier al in scope (boven)
+        pricing_df = pricing_by_supplier[selected_supplier]
+
+        out_df = process_supplier(
+            data_all=data_filtered,
+            supplier_name=selected_supplier,
+            pricing_df=pricing_df,
+            gianluca_exceptions=gianluca_exceptions if selected_supplier.lower() == "gianluca" else pd.DataFrame(columns=["locatienummer", "handelingskosten"])
+        )
+
+        st.subheader("Bekijk en exporteer resultaat")
+        st.dataframe(out_df.head(40), use_container_width=True)
+
+        xbytes = export_excel_bytes(out_df)
+        st.download_button(
+            label=f"💾 Download self-billing ({selected_supplier}).xlsx",
+            data=xbytes,
+            file_name=f"selfbilling_{selected_supplier.lower().replace(' ', '_')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
 
 else:
     st.info("Upload één of meer Excel-bestanden om te berekenen en te exporteren.")
