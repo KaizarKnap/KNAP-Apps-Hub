@@ -156,7 +156,6 @@ def normalize_loc(l):
     if l is None:
         return ""
     s = str(l).strip()
-    # Verwijder typische Excel-float artefacten
     if s.endswith(".0"):
         s = s[:-2]
     return s
@@ -234,14 +233,11 @@ if files:
     st.subheader("🧩 Productomschrijvingen")
     st.caption("Alle regels gaan standaard mee. Alleen productomschrijvingen met een trefwoord kun je hieronder (de)activeren.")
 
-    # 1) Vind kolom + alle unieke productomschrijvingen
     product_col = next((c for c in data.columns if "productomschrijving" in str(c).lower()), None)
     products_all = sorted(data[product_col].dropna().astype(str).unique().tolist()) if product_col else []
 
-    # 2) Definieer trefwoorden (hoofdletterongevoelig)
     keywords = ["balen", "zakken", "afzet", "pers"]  # pas aan naar wens
 
-    # 3) Splits: welke producten matchen trefwoorden, welke niet
     impacted = [p for p in products_all if any(k in p.lower() for k in keywords)]
     unaffected = [p for p in products_all if p not in impacted]
 
@@ -250,23 +246,18 @@ if files:
     else:
         st.write(f"🔎 Gevonden **{len(impacted)}** productomschrijvingen met trefwoord en **{len(unaffected)}** zonder trefwoord.")
 
-        # 4) Toon alleen toggles voor de 'impacted' (standaard: AAN = meenemen)
         active_impacted = []
         if impacted:
             st.markdown("**Beoordeel productomschrijvingen met trefwoord:**")
-            cols = st.columns(2)  # rustige 2-koloms layout
+            cols = st.columns(2)
             for i, prod in enumerate(impacted):
                 with cols[i % 2]:
                     if st.toggle(prod, value=True, key=f"kwprod_{i}"):
                         active_impacted.append(prod)
 
-        # 5) Actieve set = alles zonder trefwoord + de door jou ingeschakelde trefwoord-producten
         active_products = set(unaffected) | set(active_impacted)
-
-        # 6) Filter de data (alleen regels met geselecteerde productomschrijvingen blijven over)
         data = data[data[product_col].astype(str).isin(active_products)]
 
-        # 7) Feedback
         excluded = set(impacted) - set(active_impacted)
         st.success(f"✅ Meegenomen: {len(active_products)} productomschrijvingen "
                    f"(waarvan {len(active_impacted)} met trefwoord).")
@@ -281,7 +272,6 @@ if files:
         if pd.notna(r["locatienummer"])
     }
 
-    # Dedup voor per_stop leveranciers
     seen_per_stop = set()
 
     for _, row in data.iterrows():
@@ -319,7 +309,6 @@ if files:
             loc = normalize_loc(row.get("Locatienummer", ""))
             status = str(row.get("Status", "")).strip().lower()
 
-            # Handelingskosten alleen bij VOLTOOID
             if status == "voltooid" and loc in loc_dict:
                 bedrag += loc_dict[loc]
 
@@ -330,7 +319,6 @@ if files:
             bedrag = prijs * qty
 
         elif supplier == "van bruchem":
-            # normale tarieven (zoals je al deed)
             info = match_price(row, pricing_editor, selected_supplier)
             prijs = info["prijs"]
             qty = units_from_row(row, info["tarieftype"])
@@ -351,16 +339,10 @@ if files:
         verantwoordelijke = str(row.get("Verantwoordelijke partij", "")).strip().lower()
         status = str(row.get("Status", "")).strip().lower()
 
-        # 1) Status 'Gepland' → altijd 0
         if status in ("gepland", "geannuleerd", "discussie"):
             bedrag = 0.0
-
-        # 2) Verantwoordelijke partij 'Partner' → altijd 0
         elif verantwoordelijke == "partner":
             bedrag = 0.0
-
-        # 3) Verantwoordelijke partij 'Client' of 'MSN' en bedrag is nu 0,
-        #    maar er is WEL een prijs → alsnog 1x uitbetalen
         elif verantwoordelijke in ("client", "msn") and bedrag == 0 and prijs > 0:
             bedrag = prijs
 
@@ -374,23 +356,22 @@ if files:
 
             stop_key = (dag_key, loc_key)
 
-            # Alleen dedupen op de "stop-fee"
             if bedrag > 0 and prijs > 0 and abs(bedrag - prijs) < 1e-9:
                 if stop_key in seen_per_stop:
                     bedrag = 0.0
                 else:
                     seen_per_stop.add(stop_key)
 
-        # Outputregel
+        # ✅ Outputregel (Kilogram altijd LEEG op normale regels, inclusief persregel)
         base_row = {
             **{c: row.get(c, None) for c in CANON_COLS if c in data.columns},
-            "Kilogram": get_kg_value(row, data),
+            "Kilogram": None,
             "Prijs per stuk": prijs,
             "Bedrag": bedrag
         }
         results.append(base_row)
 
-        # EXTRA: KG-regel direct onder persregel (bedrag 0, vul jij later aan)
+        # ✅ EXTRA: Kilogram-regel direct onder persregel (hier komt Kilogram WÉL gevuld)
         if is_vanbruchem_pers_23_pk:
             kg_row = {
                 **{c: row.get(c, None) for c in CANON_COLS if c in data.columns},
@@ -430,7 +411,6 @@ if files:
         last_row = len(out_export) + 2
         bedrag_col = out_export.columns.get_loc("BEDRAG")
 
-        # Label links van bedragkolom (veilig voor kolom A)
         label_col_idx = max(bedrag_col - 1, 0)
 
         def excel_col(n):
