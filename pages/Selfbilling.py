@@ -7,10 +7,11 @@ st.title("🧾 Self-billing per leverancier")
 st.caption("Upload leveranciers-Excel(s), bereken automatisch de self-billing en exporteer het resultaat.")
 
 
-# Canonieke kolommen
+# Canonieke kolommen (met Kilogram naast Gepland)
 CANON_COLS = [
     "Ophaaldatum", "Locatienummer", "Debiteurnummer", "Klantnaam",
     "Leverancier", "Dienst logistiek", "Uitgevoerd", "Gepland",
+    "Kilogram",
     "Status", "Productomschrijving", "Afvalstroom", "Straat",
     "Huisnr", "Postcode", "Plaats", "Verantwoordelijke partij"
 ]
@@ -35,23 +36,24 @@ SUPPLIERS = [
 
 # Schuman prijs-matrix (Volume, Afvalstroom)
 SCHUMAN_PRICES = {
-("240L", "Restafval"): 8.93,
-("240L", "Papier/Karton"): 4.70,
-("360L", "Restafval"): 12.08,
-("360L", "Papier/Karton"): 4.70,
-("500L", "Restafval"): 13.13,
-("660L", "Restafval"): 16.28,
-("660L", "Papier/Karton"): 4.70,
-("750L", "Restafval"): 18.38,
-("770L", "Restafval"): 18.38,
-("770L", "Papier/Karton"): 4.70,
-("1100L", "Restafval"): 23.63,
-("1100L", "Papier/Karton"): 4.70,
-("1600L", "Papier/Karton"): 4.70,
-("1700L", "Papier/Karton"): 4.70,
-("2400L", "Papier/Karton"): 4.70,
-("-", "Papier/Karton"): 55.00,
+    ("240L", "Restafval"): 8.93,
+    ("240L", "Papier/Karton"): 4.70,
+    ("360L", "Restafval"): 12.08,
+    ("360L", "Papier/Karton"): 4.70,
+    ("500L", "Restafval"): 13.13,
+    ("660L", "Restafval"): 16.28,
+    ("660L", "Papier/Karton"): 4.70,
+    ("750L", "Restafval"): 18.38,
+    ("770L", "Restafval"): 18.38,
+    ("770L", "Papier/Karton"): 4.70,
+    ("1100L", "Restafval"): 23.63,
+    ("1100L", "Papier/Karton"): 4.70,
+    ("1600L", "Papier/Karton"): 4.70,
+    ("1700L", "Papier/Karton"): 4.70,
+    ("2400L", "Papier/Karton"): 4.70,
+    ("-", "Papier/Karton"): 55.00,
 }
+
 
 # Helperfuncties
 @st.cache_data(show_spinner=False)
@@ -84,11 +86,13 @@ def read_excel(file):
 
     return df
 
+
 def get_col(df, hint):
     for c in df.columns:
-        if hint.lower() in c.lower():
+        if hint.lower() in str(c).lower():
             return c
     return None
+
 
 def normalize_afvalstroom(v):
     v = str(v).strip().lower().replace(" ", "")
@@ -100,11 +104,13 @@ def normalize_afvalstroom(v):
         return "Vertrouwelijk papier"
     return v
 
+
 def normalize_volume(v):
     v = str(v).strip().upper().replace(" ", "")
     if v.isdigit() and not v.endswith("L"):
         v += "L"
     return v
+
 
 # ✅ NIEUW: ook m3 varianten normaliseren (voor pers 23m3)
 def normalize_volume_any(v):
@@ -118,6 +124,7 @@ def normalize_volume_any(v):
     s = s.replace("M³", "M3")
     return s
 
+
 def units_from_row(row, tarieftype):
     val = row.get("Uitgevoerd", 0)
     if tarieftype == "per_kiep":
@@ -127,19 +134,22 @@ def units_from_row(row, tarieftype):
             return 1 if str(val).strip() else 0
     return 1 if str(val).strip() else 0
 
+
 def match_price(row, pricing_df, supplier):
     afst = str(row.get("Afvalstroom", "")).strip()
     df = pricing_df[pricing_df["leverancier"].str.lower().str.contains(supplier.lower())]
+
     if supplier.lower() == "visser assen":
         for _, r in df.iterrows():
-            if r["afvalstroom"].lower() == afst.lower():
+            if str(r["afvalstroom"]).lower() == str(afst).lower():
                 return {"tarieftype": "per_kiep", "prijs": r["prijs"]}
+
     if not df.empty:
         r = df.iloc[0]
         return {"tarieftype": r["tarieftype"], "prijs": r["prijs"]}
-    return {"tarieftype": "per_stop", "prijs": 0.0
 
-}
+    return {"tarieftype": "per_stop", "prijs": 0.0}
+
 
 def normalize_loc(l):
     """Zorgt dat locatienummers altijd uniform zijn, ongeacht type of notatie."""
@@ -150,6 +160,23 @@ def normalize_loc(l):
     if s.endswith(".0"):
         s = s[:-2]
     return s
+
+
+def get_kg_value(row, df):
+    """
+    Probeert een gewicht/kg kolom te vinden en geeft de waarde terug.
+    """
+    candidates = []
+    for c in df.columns:
+        cl = str(c).lower().strip()
+        if "gewicht" in cl or cl == "kg" or "kilo" in cl:
+            candidates.append(c)
+
+    for c in candidates:
+        v = row.get(c, None)
+        if pd.notna(v) and str(v).strip() != "":
+            return v
+    return None
 
 
 # UI
@@ -208,7 +235,7 @@ if files:
     st.caption("Alle regels gaan standaard mee. Alleen productomschrijvingen met een trefwoord kun je hieronder (de)activeren.")
 
     # 1) Vind kolom + alle unieke productomschrijvingen
-    product_col = next((c for c in data.columns if "productomschrijving" in c.lower()), None)
+    product_col = next((c for c in data.columns if "productomschrijving" in str(c).lower()), None)
     products_all = sorted(data[product_col].dropna().astype(str).unique().tolist()) if product_col else []
 
     # 2) Definieer trefwoorden (hoofdletterongevoelig)
@@ -242,7 +269,7 @@ if files:
         # 7) Feedback
         excluded = set(impacted) - set(active_impacted)
         st.success(f"✅ Meegenomen: {len(active_products)} productomschrijvingen "
-                f"(waarvan {len(active_impacted)} met trefwoord).")
+                   f"(waarvan {len(active_impacted)} met trefwoord).")
         if excluded:
             st.warning(f"🚫 Uitgesloten (trefwoord): {len(excluded)}")
 
@@ -254,14 +281,14 @@ if files:
         if pd.notna(r["locatienummer"])
     }
 
-    # ✅ Dedup voor per_stop leveranciers
+    # Dedup voor per_stop leveranciers
     seen_per_stop = set()
 
     for _, row in data.iterrows():
         supplier = selected_supplier.lower()
 
-        # Handig voor pers-detectie (Van Bruchem)
-        product_col_local = next((c for c in data.columns if "productomschrijving" in c.lower()), None)
+        # Voor pers-detectie (Van Bruchem)
+        product_col_local = next((c for c in data.columns if "productomschrijving" in str(c).lower()), None)
         prod_txt = str(row.get(product_col_local, "")) if product_col_local else ""
         vol_col = get_col(data, "volume")
         afst_col = get_col(data, "afvalstroom")
@@ -309,7 +336,7 @@ if files:
             qty = units_from_row(row, info["tarieftype"])
             bedrag = prijs if info["tarieftype"] == "per_stop" and qty > 0 else prijs * qty
 
-            # ✅ Pers 23m3 Papier/Karton: €92 ALS uitgevoerd
+            # Pers 23m3 Papier/Karton: €92 ALS uitgevoerd
             if is_vanbruchem_pers_23_pk and qty > 0:
                 prijs = 92.0
                 bedrag = 92.0
@@ -354,22 +381,21 @@ if files:
                 else:
                     seen_per_stop.add(stop_key)
 
-        # ✅ Resultaatregel
+        # Outputregel
         base_row = {
             **{c: row.get(c, None) for c in CANON_COLS if c in data.columns},
+            "Kilogram": get_kg_value(row, data),
             "Prijs per stuk": prijs,
             "Bedrag": bedrag
         }
         results.append(base_row)
 
-        # ✅ EXTRA: KG-regel direct onder persregel (bedrag 0, vul jij later aan)
+        # EXTRA: KG-regel direct onder persregel (bedrag 0, vul jij later aan)
         if is_vanbruchem_pers_23_pk:
-            kg = row.get("Gewicht", None)  # pas aan als je kolom anders heet
-            kg_txt = "" if pd.isna(kg) else str(kg)
-
             kg_row = {
                 **{c: row.get(c, None) for c in CANON_COLS if c in data.columns},
-                "Productomschrijving": f"Kilogrammen opgehaald met pers (23m3) - {kg_txt}",
+                "Kilogram": get_kg_value(row, data),
+                "Productomschrijving": "Kilogrammen opgehaald met pers (23m3)",
                 "Prijs per stuk": 0.0,
                 "Bedrag": 0.0
             }
