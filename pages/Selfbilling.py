@@ -2,6 +2,9 @@ import io
 import zipfile
 import pandas as pd
 import streamlit as st
+import openpyxl
+from copy import copy
+from datetime import date as dt_date
 
 # GEEN st.set_page_config hier (dat gebeurt in Home.py)
 st.title("🧾 Self-billing per leverancier")
@@ -76,12 +79,17 @@ DEFAULT_RULES = {
 
 DEFAULT_KEYWORDS = ["balen", "zakken", "afzet", "pers"]
 
+DUTCH_MONTHS = {
+    1: "Januari", 2: "Februari", 3: "Maart", 4: "April", 5: "Mei", 6: "Juni",
+    7: "Juli", 8: "Augustus", 9: "September", 10: "Oktober", 11: "November", 12: "December"
+}
+
 # -------------------- HELPERS --------------------
 @st.cache_data(show_spinner=False)
 def read_excel(file):
     preview = pd.read_excel(file, nrows=10, header=None)
     header_row = preview.apply(
-        lambda r: r.astype(str).str.contains("Leverancier|Afvalstroom", case=False, na=False)
+        lambda r: r.astype(str).str.contains("Leverancier|Afvalstroom|Productomschrijving", case=False, na=False)
     ).any(axis=1)
     header_index = header_row.idxmax() if header_row.any() else 0
     df = pd.read_excel(file, header=header_index)
@@ -161,9 +169,7 @@ def match_price(row, pricing_df, supplier):
         r = df.iloc[0]
         return {"tarieftype": r["tarieftype"], "prijs": float(r["prijs"])}
 
-    return {"tarieftype": "per_stop", "prijs": 0.0
-
-}
+    return {"tarieftype": "per_stop", "prijs": 0.0}
 
 def get_kg_value(row, df):
     candidates = []
@@ -224,6 +230,57 @@ def apply_product_filter(data: pd.DataFrame, product_col: str, allowed_products:
         return data
     return data[data[product_col].astype(str).isin(allowed_products)].copy()
 
+def compute_allowed_products_toggles(df_sup: pd.DataFrame, supplier_name: str, keywords: list[str]) -> set | None:
+    product_col = next((c for c in df_sup.columns if "productomschrijving" in str(c).lower()), None)
+    if product_col is None:
+        st.info("Geen kolom ‘Productomschrijving’ gevonden. Er wordt niet gefilterd.")
+        return None
+
+    products_all = sorted(df_sup[product_col].dropna().astype(str).unique().tolist())
+    if not products_all:
+        st.info("Geen productomschrijvingen gevonden. Er wordt niet gefilterd.")
+        return None
+
+    impacted = [p for p in products_all if any(k in p.lower() for k in keywords)]
+    unaffected = [p for p in products_all if p not in impacted]
+
+    st.write(f"🔎 Gevonden **{len(impacted)}** met trefwoord en **{len(unaffected)}** zonder trefwoord.")
+    st.caption("Alles zonder trefwoord gaat altijd mee. Zet hieronder alleen trefwoord-regels aan/uit.")
+
+    active_impacted = []
+    if impacted:
+        cols = st.columns(2)
+        for i, prod in enumerate(impacted):
+            key = f"tgl_{supplier_name}_{hash(prod)}"
+            with cols[i % 2]:
+                if st.toggle(prod, value=True, key=key):
+                    active_impacted.append(prod)
+
+    allowed = set(unaffected) | set(active_impacted)
+    excluded = set(impacted) - set(active_impacted)
+
+    st.success(f"✅ Meegenomen: {len(allowed)} productomschrijvingen (waarvan {len(active_impacted)} met trefwoord).")
+    if excluded:
+        st.warning(f"🚫 Uitgesloten (trefwoord): {len(excluded)}")
+
+    return allowed
+
+def detect_month_year_from_df(df: pd.DataFrame) -> tuple[int | None, int | None]:
+    # Pak eerste geldige datum uit OPHAALDATUM/Ophaaldatum kolom
+    col = None
+    for c in df.columns:
+        if str(c).strip().lower() in ("ophaaldatum", "ophaal datum", "ophaal_datum"):
+            col = c
+            break
+    if col is None:
+        return None, None
+    ser = pd.to_datetime(df[col], errors="coerce")
+    ser = ser.dropna()
+    if ser.empty:
+        return None, None
+    d = ser.iloc[0].to_pydatetime().date()
+    return d.month, d.year
+
 def process_supplier(
     data_all: pd.DataFrame,
     supplier_name: str,
@@ -273,6 +330,7 @@ def process_supplier(
             and (afst_norm == "Papier/Karton")
         )
 
+        # ---- prijsberekening ----
         if supplier == "schuman":
             ttype = "per_kiep"
             volume = normalize_volume(row.get(vol_col, "")) if vol_col else ""
@@ -315,6 +373,7 @@ def process_supplier(
             qty = units_from_row(row, info["tarieftype"])
             bedrag = prijs if info["tarieftype"] == "per_stop" and qty > 0 else prijs * qty
 
+        # ---- status/verantwoordelijke ----
         verantwoordelijke = str(row.get("Verantwoordelijke partij", "")).strip().lower()
         status = str(row.get("Status", "")).strip().lower()
 
@@ -325,6 +384,7 @@ def process_supplier(
         elif rules.get("rule_client_msn_minpay", True) and verantwoordelijke in ("client", "msn") and bedrag == 0 and prijs > 0:
             bedrag = prijs
 
+        # ---- dedup per_stop ----
         if rules.get("rule_dedup_per_stop", True) and supplier in ("recycling-continue", "gianluca", "revema", "gogogo"):
             loc_key = normalize_loc(row.get("Locatienummer", ""))
 
@@ -340,18 +400,20 @@ def process_supplier(
                 else:
                     seen_per_stop.add(stop_key)
 
+        # ---- base row (Kilogram altijd leeg) ----
         base_row = {
             **{c: row.get(c, None) for c in CANON_COLS if c in data.columns},
-            "Kilogram": None,  # ALTIJD leeg op normale regels en persregels
+            "Kilogram": None,
             "Prijs per stuk": prijs,
             "Bedrag": bedrag
         }
         results.append(base_row)
 
+        # ---- extra kg-regel onder pers (alleen kg kolom gevuld) ----
         if supplier == "van bruchem" and rules.get("rule_vanbruchem_add_kg_row", True) and is_vanbruchem_pers_23_pk:
             kg_row = {
                 **{c: row.get(c, None) for c in CANON_COLS if c in data.columns},
-                "Kilogram": get_kg_value(row, data),  # ALLEEN op kilogram-regel gevuld
+                "Kilogram": get_kg_value(row, data),
                 "Productomschrijving": "Kilogrammen opgehaald met pers (23m3)",
                 "Prijs per stuk": 0.0,
                 "Bedrag": 0.0
@@ -359,6 +421,62 @@ def process_supplier(
             results.append(kg_row)
 
     return pd.DataFrame(results)
+
+# -------------------- INLEESBESTAND HELPERS --------------------
+def copy_row_style(ws, src_row: int, dst_row: int, max_col: int):
+    """Kopieer cel-stijl (incl. number formats) van src_row naar dst_row."""
+    ws.row_dimensions[dst_row].height = ws.row_dimensions[src_row].height
+    for c in range(1, max_col + 1):
+        src = ws.cell(row=src_row, column=c)
+        dst = ws.cell(row=dst_row, column=c)
+        if src.has_style:
+            dst._style = copy(src._style)
+        dst.number_format = src.number_format
+        dst.font = copy(src.font)
+        dst.border = copy(src.border)
+        dst.fill = copy(src.fill)
+        dst.alignment = copy(src.alignment)
+        dst.protection = copy(src.protection)
+        dst.comment = None
+
+def build_inleesbestand_from_template(template_bytes: bytes, rows: list[dict]) -> bytes:
+    """
+    Bouwt een nieuw Excel bestand op basis van template, zonder headers/stijl te wijzigen.
+    We vullen alleen waarden in bestaande kolommen.
+    """
+    buf = io.BytesIO(template_bytes)
+    wb = openpyxl.load_workbook(buf)
+    ws = wb[wb.sheetnames[0]]
+
+    max_col = ws.max_column
+    headers = [ws.cell(row=1, column=c).value for c in range(1, max_col + 1)]
+    header_map = {str(h).strip(): idx + 1 for idx, h in enumerate(headers) if h is not None}
+
+    # template heeft doorgaans 1 voorbeeldregel op rij 2 -> gebruik die stijl als “basis”
+    style_row = 2 if ws.max_row >= 2 else 1
+    start_row = 2  # overschrijf sample-rij als die er is
+    # Als er in jouw template al meerdere voorbeeldregels staan: dan gaan we append vanaf laatste+1
+    if ws.max_row > 2:
+        start_row = ws.max_row + 1
+
+    for i, r in enumerate(rows):
+        target_row = start_row + i
+
+        # stijl kopiëren
+        if target_row != style_row:
+            copy_row_style(ws, style_row, target_row, max_col)
+
+        # waarden invullen
+        for k, v in r.items():
+            if k not in header_map:
+                continue  # mag niks aan koppen veranderen
+            col_idx = header_map[k]
+            ws.cell(row=target_row, column=col_idx).value = v
+
+    out = io.BytesIO()
+    wb.save(out)
+    out.seek(0)
+    return out.getvalue()
 
 # -------------------- UI: MODE --------------------
 mode = st.radio(
@@ -376,6 +494,27 @@ kw_text = st.text_input(
     help="Alleen productomschrijvingen die één van deze woorden bevatten kun je per leverancier aan/uit zetten."
 )
 KEYWORDS = [k.strip().lower() for k in kw_text.split(",") if k.strip()]
+
+# -------------------- UI: INLEESBESTAND OPTIE --------------------
+st.subheader("📥 Inleesbestand (Order inlezen)")
+make_inlees = st.checkbox("Maak ook een inleesbestand (1 regel per leverancier)", value=False)
+
+template_file = None
+inlees_date = None
+loc_map_editor = None
+
+if make_inlees:
+    template_file = st.file_uploader(
+        "Upload Template orders inlezen.xlsx (koppen/stijl mogen niet wijzigen)",
+        type=["xlsx"],
+        accept_multiple_files=False,
+        key="inlees_template"
+    )
+    inlees_date = st.date_input("Uitvoerdatum (voor inleesbestand)", value=dt_date.today())
+
+    st.caption("Vul per leverancier de Locatiecode in (verplicht voor inleesbestand).")
+    loc_map_default = pd.DataFrame([{"Leverancier": s, "Locatiecode": ""} for s in SUPPLIERS])
+    loc_map_editor = st.data_editor(loc_map_default, use_container_width=True, num_rows="fixed", key="loc_map_editor")
 
 # -------------------- UI: RULES + PRICING --------------------
 st.subheader("Instellingen per leverancier")
@@ -474,51 +613,8 @@ if not supplier_col:
     st.error("Geen kolom gevonden die ‘Leverancier’ bevat. Controleer je Excel.")
     st.stop()
 
-product_col_all = next((c for c in data_all.columns if "productomschrijving" in str(c).lower()), None)
-
 # -------------------- PRODUCT FILTERS: PER LEVERANCIER (TOGGLES) --------------------
 allowed_products_by_supplier: dict[str, set | None] = {}
-
-def compute_allowed_products_toggles(df_sup: pd.DataFrame, supplier_name: str) -> set | None:
-    """
-    Build allowlist using toggles for impacted products.
-    - unaffected always included
-    - impacted included only if toggle is ON
-    """
-    if product_col_all is None:
-        st.info("Geen kolom ‘Productomschrijving’ gevonden. Er wordt niet gefilterd.")
-        return None
-
-    products_all = sorted(df_sup[product_col_all].dropna().astype(str).unique().tolist())
-    if not products_all:
-        st.info("Geen productomschrijvingen gevonden. Er wordt niet gefilterd.")
-        return None
-
-    impacted = [p for p in products_all if any(k in p.lower() for k in KEYWORDS)]
-    unaffected = [p for p in products_all if p not in impacted]
-
-    st.write(f"🔎 Gevonden **{len(impacted)}** met trefwoord en **{len(unaffected)}** zonder trefwoord.")
-    st.caption("Alles zonder trefwoord gaat altijd mee. Zet hieronder alleen trefwoord-regels aan/uit.")
-
-    active_impacted = []
-
-    if impacted:
-        cols = st.columns(2)
-        for i, prod in enumerate(impacted):
-            # sleutel stabiel per leverancier + product
-            key = f"tgl_{supplier_name}_{hash(prod)}"
-            with cols[i % 2]:
-                if st.toggle(prod, value=True, key=key):
-                    active_impacted.append(prod)
-
-    allowed = set(unaffected) | set(active_impacted)
-
-    excluded = set(impacted) - set(active_impacted)
-    st.success(f"✅ Meegenomen: {len(allowed)} productomschrijvingen (waarvan {len(active_impacted)} met trefwoord).")
-    if excluded:
-        st.warning(f"🚫 Uitgesloten (trefwoord): {len(excluded)}")
-
-    return allowed
 
 if process_all:
     st.subheader("🧩 Productomschrijvingen per leverancier (bulk)")
@@ -532,18 +628,25 @@ if process_all:
     for s in present_suppliers:
         df_sup = data_all[data_all[supplier_col].astype(str).str.lower().str.contains(s.lower())].copy()
         with st.expander(f"Productomschrijvingen: {s}", expanded=False):
-            allowed_products_by_supplier[s] = compute_allowed_products_toggles(df_sup, supplier_name=s)
+            allowed_products_by_supplier[s] = compute_allowed_products_toggles(df_sup, supplier_name=s, keywords=KEYWORDS)
 
 else:
     st.subheader("🧩 Productomschrijvingen (geselecteerde leverancier)")
     df_sup = data_all[data_all[supplier_col].astype(str).str.lower().str.contains(selected_supplier.lower())].copy()
-    allowed_products_by_supplier[selected_supplier] = compute_allowed_products_toggles(df_sup, supplier_name=selected_supplier)
+    allowed_products_by_supplier[selected_supplier] = compute_allowed_products_toggles(df_sup, supplier_name=selected_supplier, keywords=KEYWORDS)
 
 # -------------------- RUN --------------------
 if process_all:
     st.subheader("Resultaten per leverancier")
 
     zip_buf = io.BytesIO()
+    inlees_rows = []
+    loc_map = {}
+
+    if make_inlees and loc_map_editor is not None:
+        for _, r in loc_map_editor.iterrows():
+            loc_map[str(r["Leverancier"]).strip()] = str(r["Locatiecode"]).strip()
+
     with zipfile.ZipFile(zip_buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         for s in present_suppliers:
             out_df = process_supplier(
@@ -562,9 +665,50 @@ if process_all:
             st.markdown(f"**{s}** — {len(out_df)} regels")
             st.dataframe(out_df.head(20), use_container_width=True)
 
+            # Selfbilling export
             xbytes = export_excel_bytes(out_df)
             fname = f"selfbilling_{s.lower().replace(' ', '_')}.xlsx"
             zf.writestr(fname, xbytes)
+
+            # Inlees regel verzamelen (1 per leverancier)
+            if make_inlees:
+                total = float(pd.to_numeric(out_df.get("Bedrag", 0), errors="coerce").fillna(0).sum())
+                # totaal moet NEGATIEF in Kenmerk
+                kenmerk_val = -round(total, 2)
+
+                m, y = detect_month_year_from_df(out_df)
+                if m is None or y is None:
+                    m = inlees_date.month
+                    y = inlees_date.year
+
+                boekstuk = f"Selfbilling maand {DUTCH_MONTHS.get(m, str(m))} {y}"
+
+                loc_code = loc_map.get(s, "")
+                inlees_rows.append({
+                    "Locatiecode": loc_code,
+                    "Artikelcode": 900100,
+                    "Aantal": 1,
+                    "Uitvoerdatum": inlees_date.strftime("%d-%m-%Y"),
+                    "Dienst": "Administratief",
+                    "Dienst_Factureren": "Standaard",
+                    "Kenmerk": kenmerk_val,
+                    "Boekstuknummer": boekstuk,
+                    "Lev_AddresNumber": ""  # leeg laten
+                })
+
+        # Inleesbestand maken + in ZIP stoppen
+        if make_inlees:
+            if template_file is None:
+                st.error("Je hebt ‘Maak inleesbestand’ aangezet, maar nog geen template geüpload.")
+            else:
+                # check locatiecodes ingevuld
+                missing = [r for r in inlees_rows if not str(r.get("Locatiecode", "")).strip()]
+                if missing:
+                    st.error("Inleesbestand: niet alle Locatiecode waarden zijn ingevuld. Vul ze in bij ‘Locatiecode per leverancier’.")
+                else:
+                    template_bytes = template_file.getvalue()
+                    inlees_bytes = build_inleesbestand_from_template(template_bytes, inlees_rows)
+                    zf.writestr("orders_inlezen_selfbilling.xlsx", inlees_bytes)
 
     zip_buf.seek(0)
     st.download_button(
@@ -573,6 +717,18 @@ if process_all:
         file_name="selfbilling_per_leverancier.zip",
         mime="application/zip"
     )
+
+    # Extra: losse download van inleesbestand (handig, zonder ZIP)
+    if make_inlees and template_file is not None and inlees_rows:
+        # alleen aanbieden als alle locatiecodes ingevuld
+        if all(str(r.get("Locatiecode", "")).strip() for r in inlees_rows):
+            inlees_bytes_single = build_inleesbestand_from_template(template_file.getvalue(), inlees_rows)
+            st.download_button(
+                label="📥 Download inleesbestand (orders_inlezen_selfbilling.xlsx)",
+                data=inlees_bytes_single,
+                file_name="orders_inlezen_selfbilling.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
 
 else:
     out_df = process_supplier(
@@ -594,3 +750,47 @@ else:
         file_name=f"selfbilling_{selected_supplier.lower().replace(' ', '_')}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
+
+    # Inleesbestand single-supplier
+    if make_inlees:
+        if template_file is None:
+            st.error("Je hebt ‘Maak inleesbestand’ aangezet, maar nog geen template geüpload.")
+        else:
+            loc_code = ""
+            if loc_map_editor is not None:
+                row = loc_map_editor[loc_map_editor["Leverancier"].astype(str).str.strip().eq(selected_supplier)]
+                if not row.empty:
+                    loc_code = str(row.iloc[0]["Locatiecode"]).strip()
+
+            if not loc_code:
+                st.error("Inleesbestand: Locatiecode is leeg. Vul deze in bij ‘Locatiecode per leverancier’.")
+            else:
+                total = float(pd.to_numeric(out_df.get("Bedrag", 0), errors="coerce").fillna(0).sum())
+                kenmerk_val = -round(total, 2)
+
+                m, y = detect_month_year_from_df(out_df)
+                if m is None or y is None:
+                    m = inlees_date.month
+                    y = inlees_date.year
+
+                boekstuk = f"Selfbilling maand {DUTCH_MONTHS.get(m, str(m))} {y}"
+
+                inlees_rows = [{
+                    "Locatiecode": loc_code,
+                    "Artikelcode": 900100,
+                    "Aantal": 1,
+                    "Uitvoerdatum": inlees_date.strftime("%d-%m-%Y"),
+                    "Dienst": "Administratief",
+                    "Dienst_Factureren": "Standaard",
+                    "Kenmerk": kenmerk_val,
+                    "Boekstuknummer": boekstuk,
+                    "Lev_AddresNumber": ""
+                }]
+
+                inlees_bytes = build_inleesbestand_from_template(template_file.getvalue(), inlees_rows)
+                st.download_button(
+                    label="📥 Download inleesbestand (orders_inlezen_selfbilling.xlsx)",
+                    data=inlees_bytes,
+                    file_name="orders_inlezen_selfbilling.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
