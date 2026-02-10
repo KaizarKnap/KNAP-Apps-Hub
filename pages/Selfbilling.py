@@ -76,6 +76,12 @@ DEFAULT_RULES = {
 
 DEFAULT_KEYWORDS = ["balen", "zakken", "afzet", "pers"]
 
+# Van Bruchem pers-afspraken per plaats
+VAN_BRUCHEM_PERS_PRICES = {
+    "tiel": 102.50,
+    "geldermalsen": 82.00
+}
+
 # -------------------- HELPERS --------------------
 @st.cache_data(show_spinner=False)
 def read_excel(file):
@@ -305,9 +311,22 @@ def process_supplier(
             qty = units_from_row(row, info["tarieftype"])
             bedrag = prijs if info["tarieftype"] == "per_stop" and qty > 0 else prijs * qty
 
-            if rules.get("rule_vanbruchem_pers_92", True) and is_vanbruchem_pers_23_pk and qty > 0:
+            # --- NIEUW: pers-prijzen per plaats (alleen bij uitgevoerd) ---
+            plaats_txt = str(row.get("Plaats", "")).strip().lower()
+            is_pers = ("pers" in prod_txt.lower())
+
+            if is_pers and qty > 0:
+                for plaats_key, pers_prijs in VAN_BRUCHEM_PERS_PRICES.items():
+                    if plaats_key in plaats_txt:
+                        prijs = float(pers_prijs)
+                        bedrag = float(pers_prijs)
+                        break
+
+            # --- bestaande afspraak: 23m3 Pers Papier/Karton = €92 (alleen als er géén plaats-match was) ---
+            if rules.get("rule_vanbruchem_pers_92", True) and is_vanbruchem_pers_23_pk and qty > 0 and not (is_pers and any(k in plaats_txt for k in VAN_BRUCHEM_PERS_PRICES.keys())):
                 prijs = 92.0
                 bedrag = 92.0
+
 
         else:
             info = match_price(row, pricing_df, supplier_name)
