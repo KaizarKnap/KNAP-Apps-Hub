@@ -38,6 +38,13 @@ def fill_weight(cur, new):
         return new
     return cur
 
+def pick_col(df, candidates):
+    """Kiest de eerste bestaande kolom uit candidates."""
+    for c in candidates:
+        if c in df.columns:
+            return c
+    return None
+
 # ---------- Upload sectie ----------
 st.subheader("📂 Upload je bestanden")
 col1, col2 = st.columns(2)
@@ -59,20 +66,53 @@ if f_doel and f_bron:
     df_doel["volume_tmp"] = df_doel["Inzamelmiddel"].apply(extract_volume)
     df_doel["afval_tmp"] = df_doel["Afvalstroom"].apply(canon_afval)
 
-    # ---------- Bronbestand voorbereiden ----------
-    vereiste = ["Datum", "container type", "afvalstof", "Hoeveelheid"]
-    if not all(col in df_bron.columns for col in vereiste):
-        st.error(f"Het bronbestand mist een of meer vereiste kolommen: {vereiste}")
+    # ---------- Bronbestand voorbereiden (oud + nieuw) ----------
+    col_datum = pick_col(df_bron, ["Datum", "Uitvoerdatum", "Uitvoer datum", "uitvoerdatum"])
+    col_container = pick_col(df_bron, ["container type", "Container type", "Verpakkingstype", "Inzamelmiddel", "Containertype"])
+    col_afval = pick_col(df_bron, ["afvalstof", "Afvalstof", "Product", "Afvalstroom"])
+    col_hoeveelheid = pick_col(df_bron, ["Hoeveelheid", "Gewicht", "Aantal", "Netto gewicht", "Gewicht (kg)"])
+
+    missing = [name for name, col in {
+        "datum": col_datum,
+        "container": col_container,
+        "afval": col_afval,
+        "hoeveelheid": col_hoeveelheid
+    }.items() if col is None]
+
+    if missing:
+        st.error(
+            "Het bronbestand mist één of meer benodigde velden. "
+            f"Niet gevonden: {missing}\n\n"
+            f"Gevonden kolommen: {list(df_bron.columns)}"
+        )
         st.stop()
 
-    df_bron["datum_dt"] = pd.to_datetime(df_bron["Datum"], dayfirst=True, errors="coerce")
-    df_bron["volume_tmp"] = df_bron["container type"].apply(extract_volume)
-    df_bron["afval_tmp"] = df_bron["afvalstof"].apply(canon_afval)
+    # Datum
+    df_bron["datum_dt"] = pd.to_datetime(df_bron[col_datum], dayfirst=True, errors="coerce")
+
+    # Volume
+    df_bron["volume_tmp"] = df_bron[col_container].apply(extract_volume)
+
+    # Afvalstroom
+    df_bron["afval_tmp"] = df_bron[col_afval].apply(canon_afval)
+
+    # Hoeveelheid/gewicht
+    gewicht_series = pd.to_numeric(df_bron[col_hoeveelheid], errors="coerce")
+
+    # Als bron nieuw formaat is met "Aantal" + "Eenheid": alleen kg meenemen
+    if col_hoeveelheid == "Aantal" and "Eenheid" in df_bron.columns:
+        eenheid = df_bron["Eenheid"].astype(str).str.lower()
+        gewicht_series = gewicht_series.where(eenheid.str.contains("kg", na=False))
+
+    df_bron["gewicht_tmp"] = gewicht_series
     df_bron["used"] = False
 
     # ---------- Matching functie ----------
     def find_unique_match(d, v, a, bron_df, tol_days=1):
         """Zoekt unieke match in bron_df en markeert als gebruikt."""
+        if pd.isna(d) or pd.isna(v) or pd.isna(a):
+            return None
+
         for delta in range(0, tol_days + 1):
             for sign in ([0] if delta == 0 else [-1, 1]):
                 dt = d + timedelta(days=sign * delta) if sign != 0 else d
@@ -86,7 +126,7 @@ if f_doel and f_bron:
                 if not candidates.empty:
                     idx = candidates.index[0]
                     bron_df.loc[idx, "used"] = True
-                    return bron_df.loc[idx, "Hoeveelheid"]
+                    return bron_df.loc[idx, "gewicht_tmp"]
         return None
 
     # ---------- Matching uitvoeren ----------
