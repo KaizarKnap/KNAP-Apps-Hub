@@ -45,14 +45,15 @@ def norm_code(x):
     return s if s else None
 
 
-def parse_euro_number(x):
+def clean_weight_value(x):
     """
-    Zet waarden als:
-    '95,'
-    '1.100,'
-    '12,5'
-    '€ 1.234,56'
-    om naar float.
+    Neemt gewicht 1-op-1 over uit bronbestand.
+    Verwijdert alleen overbodige spaties en een trailing komma.
+    Voorbeelden:
+    '90,'   -> '90'
+    '167,'  -> '167'
+    '210'   -> '210'
+    90      -> '90'
     """
     if pd.isna(x):
         return None
@@ -61,23 +62,35 @@ def parse_euro_number(x):
     if s == "":
         return None
 
-    s = s.replace("€", "").replace(" ", "")
-    s = s.replace(".", "")
-    s = s.replace(",", ".")
+    s = s.replace("€", "").strip()
 
-    if s.endswith("."):
+    # alleen trailing komma eraf
+    if s.endswith(","):
         s = s[:-1]
 
+    s = s.strip()
+    return s if s != "" else None
+
+
+def is_empty_or_zero(x):
+    """Controleert of een bestaand gewicht leeg of 0 is."""
+    if pd.isna(x):
+        return True
+
+    s = str(x).strip()
+    if s == "":
+        return True
+
+    s = s.replace(",", ".")
     try:
-        return float(s)
+        return float(s) == 0
     except:
-        return None
+        return False
 
 
 def fill_weight(cur, new):
-    """Vult gewicht aan als het leeg of nul is."""
-    cur_num = pd.to_numeric(cur, errors="coerce")
-    if (pd.isna(cur_num) or cur_num == 0) and pd.notna(new):
+    """Vult gewicht alleen aan als huidige waarde leeg of 0 is."""
+    if is_empty_or_zero(cur) and pd.notna(new):
         return new
     return cur
 
@@ -165,13 +178,12 @@ if f_doel and f_bron:
     df_bron["volume_tmp"] = df_bron[col_bron_container].apply(extract_volume)
     df_bron["afval_tmp"] = df_bron[col_bron_afval].apply(canon_afval)
     df_bron["loc_tmp"] = df_bron[col_bron_loc].apply(norm_code)
-    df_bron["gewicht_tmp"] = df_bron[col_bron_gewicht].apply(parse_euro_number)
+    df_bron["gewicht_tmp"] = df_bron[col_bron_gewicht].apply(clean_weight_value)
     df_bron["used"] = False
 
     # ---------- Matching functie ----------
     def find_unique_match(d, v, a, loc, bron_df, tol_days=1):
         """Zoekt unieke match in bron_df en markeert als gebruikt."""
-
         if pd.isna(d) or pd.isna(v) or pd.isna(a):
             return None
 
@@ -253,10 +265,8 @@ if f_doel and f_bron:
         st.dataframe(df_unmatched_bron)
 
     # ---------- Export ----------
+    # exact originele kolommen behouden
     export_df = df_result[originele_kolommen].copy()
-
-    # Zorg dat Gewicht numeriek is
-    export_df["Gewicht"] = export_df["Gewicht"].apply(parse_euro_number)
 
     if list(export_df.columns) != originele_kolommen:
         st.error("❌ De kolomstructuur van het exportbestand komt niet exact overeen met het origineel!")
@@ -264,13 +274,7 @@ if f_doel and f_bron:
 
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        export_df.to_excel(writer, index=False, sheet_name="Sheet1")
-        ws = writer.sheets["Sheet1"]
-
-        if "Gewicht" in export_df.columns:
-            gewicht_col_idx = export_df.columns.get_loc("Gewicht") + 1
-            for row in range(2, len(export_df) + 2):
-                ws.cell(row=row, column=gewicht_col_idx).number_format = "0.00"
+        export_df.to_excel(writer, index=False)
 
     output.seek(0)
 
