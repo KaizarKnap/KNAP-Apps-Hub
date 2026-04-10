@@ -316,7 +316,10 @@ if uploaded:
             def format_sheet(df, sheetname):
                 ws = writer.sheets[sheetname]
                 for col_idx, col in enumerate(df.columns):
-                    max_len = max(df[col].astype(str).map(len).max(), len(col)) + 2
+                    max_len = max(
+                        df[col].map(lambda x: len(str(x)) if pd.notna(x) else 0).max(),
+                        len(str(col))
+                    ) + 2
                     ws.set_column(col_idx, col_idx, max_len, cell_format)
                     ws.write(0, col_idx, col, header_format)
 
