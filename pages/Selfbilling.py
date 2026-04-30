@@ -45,6 +45,8 @@ SCHUMAN_PRICES = {
     ("770L", "Restafval"): 18.38,
     ("770L", "Papier/Karton"): 4.70,
     ("1100L", "Restafval"): 23.63,
+    ("1600L", "Restafval"): 23.63,
+    ("1700L", "Restafval"): 23.63,
     ("1100L", "Papier/Karton"): 4.70,
     ("1600L", "Papier/Karton"): 4.70,
     ("1700L", "Papier/Karton"): 4.70,
@@ -79,8 +81,8 @@ DEFAULT_KEYWORDS = ["balen", "zakken", "afzet", "pers"]
 
 # Van Bruchem pers-afspraken per plaats
 VAN_BRUCHEM_PERS_PRICES = {
-    "tiel": 102.50,
-    "geldermalsen": 82.00
+    "tiel": 106.25,
+    "geldermalsen": 85.00
 }
 
 # -------------------- HELPERS --------------------
