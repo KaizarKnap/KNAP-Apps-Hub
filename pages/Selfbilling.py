@@ -72,6 +72,7 @@ DEFAULT_RULES = {
     "rule_gianluca_handlingskosten": True,
     "rule_vanbruchem_pers_92": True,
     "rule_vanbruchem_add_kg_row": True,
+    "rule_brandstoftoeslag": False,
 }
 
 DEFAULT_KEYWORDS = ["balen", "zakken", "afzet", "pers"]
@@ -109,11 +110,13 @@ def read_excel(file):
     df.columns = new_cols
     return df
 
+
 def get_col(df, hint):
     for c in df.columns:
         if hint.lower() in str(c).lower():
             return c
     return None
+
 
 def normalize_afvalstroom(v):
     v = str(v).strip().lower().replace(" ", "")
@@ -125,17 +128,20 @@ def normalize_afvalstroom(v):
         return "Vertrouwelijk papier"
     return v
 
+
 def normalize_volume(v):
     v = str(v).strip().upper().replace(" ", "")
     if v.isdigit() and not v.endswith("L"):
         v += "L"
     return v
 
+
 def normalize_volume_any(v):
     s = str(v).strip().upper().replace(" ", "")
     if s.isdigit():
         return s + "L"
     return s.replace("M³", "M3")
+
 
 def normalize_loc(l):
     if l is None:
@@ -145,6 +151,7 @@ def normalize_loc(l):
         s = s[:-2]
     return s
 
+
 def units_from_row(row, tarieftype):
     val = row.get("Uitgevoerd", 0)
     if tarieftype == "per_kiep":
@@ -153,6 +160,7 @@ def units_from_row(row, tarieftype):
         except Exception:
             return 1 if str(val).strip() else 0
     return 1 if str(val).strip() else 0
+
 
 def match_price(row, pricing_df, supplier):
     afst = str(row.get("Afvalstroom", "")).strip()
@@ -167,9 +175,8 @@ def match_price(row, pricing_df, supplier):
         r = df.iloc[0]
         return {"tarieftype": r["tarieftype"], "prijs": float(r["prijs"])}
 
-    return {"tarieftype": "per_stop", "prijs": 0.0
+    return {"tarieftype": "per_stop", "prijs": 0.0}
 
-}
 
 def get_kg_value(row, df):
     candidates = []
@@ -182,6 +189,7 @@ def get_kg_value(row, df):
         if pd.notna(v) and str(v).strip() != "":
             return v
     return None
+
 
 def export_excel_bytes(out_df: pd.DataFrame) -> bytes:
     out_export = out_df.copy()
@@ -217,7 +225,7 @@ def export_excel_bytes(out_df: pd.DataFrame) -> bytes:
 
             label_cell = f"{excel_col(label_col_idx)}{last_row}"
             bedrag_cell = f"{excel_col(bedrag_col)}{last_row}"
-            bedrag_range = f"{excel_col(bedrag_col)}2:{excel_col(bedrag_col)}{last_row-1}"
+            bedrag_range = f"{excel_col(bedrag_col)}2:{excel_col(bedrag_col)}{last_row - 1}"
 
             worksheet.write(label_cell, "Totaal te ontvangen bedrag")
             worksheet.write_array_formula(f"{bedrag_cell}:{bedrag_cell}", f"=SOM({bedrag_range})")
@@ -225,10 +233,36 @@ def export_excel_bytes(out_df: pd.DataFrame) -> bytes:
     buf.seek(0)
     return buf.getvalue()
 
+
 def apply_product_filter(data: pd.DataFrame, product_col: str, allowed_products: set | None) -> pd.DataFrame:
     if allowed_products is None or not product_col:
         return data
     return data[data[product_col].astype(str).isin(allowed_products)].copy()
+
+
+def calc_brandstoftoeslag(row, bedrag):
+    """
+    Berekent brandstoftoeslag per order.
+    - Papier/Karton: €0,61 per stop, ook als de klant normaal per kiep wordt berekend.
+    - Restafval: 2,5% over het orderbedrag.
+    - Transportkosten: 7% over het orderbedrag.
+
+    Let op: transport krijgt prioriteit boven afvalstroom, zodat transportkosten niet ook als rest/papier worden gezien.
+    """
+    afst = normalize_afvalstroom(row.get("Afvalstroom", ""))
+    prod = str(row.get("Productomschrijving", "")).lower()
+
+    if "transport" in prod:
+        return round(float(bedrag) * 0.07, 2), "Brandstoftoeslag transportkosten 7%"
+
+    if afst == "Papier/Karton":
+        return 0.61, "Brandstoftoeslag Papier/Karton per stop"
+
+    if afst == "Restafval":
+        return round(float(bedrag) * 0.025, 2), "Brandstoftoeslag Restafval 2,5%"
+
+    return 0.0, ""
+
 
 def process_supplier(
     data_all: pd.DataFrame,
@@ -311,7 +345,7 @@ def process_supplier(
             qty = units_from_row(row, info["tarieftype"])
             bedrag = prijs if info["tarieftype"] == "per_stop" and qty > 0 else prijs * qty
 
-            # --- NIEUW: pers-prijzen per plaats (alleen bij uitgevoerd) ---
+            # Pers-prijzen per plaats, alleen bij uitgevoerd.
             plaats_txt = str(row.get("Plaats", "")).strip().lower()
             is_pers = ("pers" in prod_txt.lower())
 
@@ -322,11 +356,15 @@ def process_supplier(
                         bedrag = float(pers_prijs)
                         break
 
-            # --- bestaande afspraak: 23m3 Pers Papier/Karton = €92 (alleen als er géén plaats-match was) ---
-            if rules.get("rule_vanbruchem_pers_92", True) and is_vanbruchem_pers_23_pk and qty > 0 and not (is_pers and any(k in plaats_txt for k in VAN_BRUCHEM_PERS_PRICES.keys())):
+            # Bestaande afspraak: 23m3 Pers Papier/Karton = €92, alleen als er geen plaats-match was.
+            if (
+                rules.get("rule_vanbruchem_pers_92", True)
+                and is_vanbruchem_pers_23_pk
+                and qty > 0
+                and not (is_pers and any(k in plaats_txt for k in VAN_BRUCHEM_PERS_PRICES.keys()))
+            ):
                 prijs = 92.0
                 bedrag = 92.0
-
 
         else:
             info = match_price(row, pricing_df, supplier_name)
@@ -361,16 +399,30 @@ def process_supplier(
 
         base_row = {
             **{c: row.get(c, None) for c in CANON_COLS if c in data.columns},
-            "Kilogram": None,  # ALTIJD leeg op normale regels en persregels
+            "Kilogram": None,
             "Prijs per stuk": prijs,
             "Bedrag": bedrag
         }
         results.append(base_row)
 
+        # Brandstoftoeslag als extra orderregel direct onder de originele order.
+        if rules.get("rule_brandstoftoeslag", False) and bedrag > 0:
+            toeslag_bedrag, toeslag_omschrijving = calc_brandstoftoeslag(row=row, bedrag=bedrag)
+
+            if toeslag_bedrag > 0:
+                toeslag_row = {
+                    **{c: row.get(c, None) for c in CANON_COLS if c in data.columns},
+                    "Kilogram": None,
+                    "Productomschrijving": toeslag_omschrijving,
+                    "Prijs per stuk": toeslag_bedrag,
+                    "Bedrag": toeslag_bedrag
+                }
+                results.append(toeslag_row)
+
         if supplier == "van bruchem" and rules.get("rule_vanbruchem_add_kg_row", True) and is_vanbruchem_pers_23_pk:
             kg_row = {
                 **{c: row.get(c, None) for c in CANON_COLS if c in data.columns},
-                "Kilogram": get_kg_value(row, data),  # ALLEEN op kilogram-regel gevuld
+                "Kilogram": get_kg_value(row, data),
                 "Productomschrijving": "Kilogrammen opgehaald met pers (23m3)",
                 "Prijs per stuk": 0.0,
                 "Bedrag": 0.0
@@ -378,6 +430,7 @@ def process_supplier(
             results.append(kg_row)
 
     return pd.DataFrame(results)
+
 
 # -------------------- UI: MODE --------------------
 mode = st.radio(
@@ -403,26 +456,63 @@ pricing_by_supplier = {}
 rules_by_supplier = {}
 gianluca_exceptions = DEFAULT_GIANLUCA_LOCS.copy()
 
+
 def supplier_pricing_default(s: str) -> pd.DataFrame:
     return DEFAULT_PRICING_ALL[DEFAULT_PRICING_ALL["leverancier"].str.lower().str.contains(s.lower())].reset_index(drop=True)
+
 
 def supplier_rules_editor(s: str, key_prefix: str) -> dict:
     with st.expander(f"Regels: {s}", expanded=False):
         r = DEFAULT_RULES.copy()
 
-        r["rule_status_zero"] = st.checkbox("Status (Gepland/Geannuleerd/Discussie) => bedrag 0", value=r["rule_status_zero"], key=f"{key_prefix}_status")
-        r["rule_partner_zero"] = st.checkbox("Verantwoordelijke partij = Partner => bedrag 0", value=r["rule_partner_zero"], key=f"{key_prefix}_partner")
-        r["rule_client_msn_minpay"] = st.checkbox("Client/MSN: als bedrag 0 maar prijs>0 => alsnog prijs", value=r["rule_client_msn_minpay"], key=f"{key_prefix}_clientmsn")
-        r["rule_dedup_per_stop"] = st.checkbox("Deduplicatie per_stop (zelfde dag + locatienummer => niet 2x stopfee)", value=r["rule_dedup_per_stop"], key=f"{key_prefix}_dedup")
+        r["rule_status_zero"] = st.checkbox(
+            "Status (Gepland/Geannuleerd/Discussie) => bedrag 0",
+            value=r["rule_status_zero"],
+            key=f"{key_prefix}_status"
+        )
+        r["rule_partner_zero"] = st.checkbox(
+            "Verantwoordelijke partij = Partner => bedrag 0",
+            value=r["rule_partner_zero"],
+            key=f"{key_prefix}_partner"
+        )
+        r["rule_client_msn_minpay"] = st.checkbox(
+            "Client/MSN: als bedrag 0 maar prijs>0 => alsnog prijs",
+            value=r["rule_client_msn_minpay"],
+            key=f"{key_prefix}_clientmsn"
+        )
+        r["rule_dedup_per_stop"] = st.checkbox(
+            "Deduplicatie per_stop (zelfde dag + locatienummer => niet 2x stopfee)",
+            value=r["rule_dedup_per_stop"],
+            key=f"{key_prefix}_dedup"
+        )
+        r["rule_brandstoftoeslag"] = st.checkbox(
+            "Brandstoftoeslag toevoegen per order",
+            value=r["rule_brandstoftoeslag"],
+            key=f"{key_prefix}_brandstoftoeslag",
+            help="Voegt per order een extra Excel-regel toe: Papier/Karton €0,61 per stop, Restafval 2,5%, Transportkosten 7%."
+        )
 
         if s.lower() == "gianluca":
-            r["rule_gianluca_handlingskosten"] = st.checkbox("Gianluca: handelingskosten op uitzonderingslocaties (alleen bij VOLTOOID)", value=r["rule_gianluca_handlingskosten"], key=f"{key_prefix}_gianluca_hk")
+            r["rule_gianluca_handlingskosten"] = st.checkbox(
+                "Gianluca: handelingskosten op uitzonderingslocaties (alleen bij VOLTOOID)",
+                value=r["rule_gianluca_handlingskosten"],
+                key=f"{key_prefix}_gianluca_hk"
+            )
 
         if s.lower() == "van bruchem":
-            r["rule_vanbruchem_pers_92"] = st.checkbox("Van Bruchem: pers 23m3 Papier/Karton = €92 (alleen bij uitgevoerd)", value=r["rule_vanbruchem_pers_92"], key=f"{key_prefix}_vb_pers92")
-            r["rule_vanbruchem_add_kg_row"] = st.checkbox("Van Bruchem: extra kilogram-regel onder persregel (Bedrag = 0)", value=r["rule_vanbruchem_add_kg_row"], key=f"{key_prefix}_vb_kgrow")
+            r["rule_vanbruchem_pers_92"] = st.checkbox(
+                "Van Bruchem: pers 23m3 Papier/Karton = €92 (alleen bij uitgevoerd)",
+                value=r["rule_vanbruchem_pers_92"],
+                key=f"{key_prefix}_vb_pers92"
+            )
+            r["rule_vanbruchem_add_kg_row"] = st.checkbox(
+                "Van Bruchem: extra kilogram-regel onder persregel (Bedrag = 0)",
+                value=r["rule_vanbruchem_add_kg_row"],
+                key=f"{key_prefix}_vb_kgrow"
+            )
 
         return r
+
 
 if process_all:
     for s in SUPPLIERS:
@@ -445,7 +535,10 @@ if process_all:
     with st.expander("Gianluca: uitzonderingen / handelingskosten", expanded=False):
         st.markdown("Locatienummers hieronder krijgen handelingskosten (alleen bij status VOLTOOID).")
         gianluca_exceptions = st.data_editor(
-            DEFAULT_GIANLUCA_LOCS, use_container_width=True, num_rows="dynamic", key="gianluca_ex_all"
+            DEFAULT_GIANLUCA_LOCS,
+            use_container_width=True,
+            num_rows="dynamic",
+            key="gianluca_ex_all"
         )
 
 else:
@@ -472,7 +565,10 @@ else:
     if selected_supplier.lower() == "gianluca":
         with st.expander("Gianluca: uitzonderingen / handelingskosten", expanded=False):
             gianluca_exceptions = st.data_editor(
-                DEFAULT_GIANLUCA_LOCS, use_container_width=True, num_rows="dynamic", key="gianluca_ex_single"
+                DEFAULT_GIANLUCA_LOCS,
+                use_container_width=True,
+                num_rows="dynamic",
+                key="gianluca_ex_single"
             )
     else:
         gianluca_exceptions = pd.DataFrame(columns=["locatienummer", "handelingskosten"])
@@ -497,6 +593,7 @@ product_col_all = next((c for c in data_all.columns if "productomschrijving" in 
 
 # -------------------- PRODUCT FILTERS: PER LEVERANCIER (TOGGLES) --------------------
 allowed_products_by_supplier: dict[str, set | None] = {}
+
 
 def compute_allowed_products_toggles(df_sup: pd.DataFrame, supplier_name: str) -> set | None:
     """
@@ -524,7 +621,6 @@ def compute_allowed_products_toggles(df_sup: pd.DataFrame, supplier_name: str) -
     if impacted:
         cols = st.columns(2)
         for i, prod in enumerate(impacted):
-            # sleutel stabiel per leverancier + product
             key = f"tgl_{supplier_name}_{hash(prod)}"
             with cols[i % 2]:
                 if st.toggle(prod, value=True, key=key):
@@ -539,11 +635,15 @@ def compute_allowed_products_toggles(df_sup: pd.DataFrame, supplier_name: str) -
 
     return allowed
 
+
 if process_all:
     st.subheader("🧩 Productomschrijvingen per leverancier (bulk)")
     st.caption("Per leverancier kun je alleen de productomschrijvingen mét trefwoord aan/uit zetten.")
 
-    present_suppliers = [s for s in SUPPLIERS if data_all[supplier_col].astype(str).str.lower().str.contains(s.lower()).any()]
+    present_suppliers = [
+        s for s in SUPPLIERS
+        if data_all[supplier_col].astype(str).str.lower().str.contains(s.lower()).any()
+    ]
     if not present_suppliers:
         st.warning("Geen bekende leveranciers gevonden in dit bestand.")
         st.stop()
@@ -570,7 +670,11 @@ if process_all:
                 supplier_name=s,
                 pricing_df=pricing_by_supplier.get(s, supplier_pricing_default(s)),
                 rules=rules_by_supplier.get(s, DEFAULT_RULES),
-                gianluca_exceptions=gianluca_exceptions if s.lower() == "gianluca" else pd.DataFrame(columns=["locatienummer", "handelingskosten"]),
+                gianluca_exceptions=(
+                    gianluca_exceptions
+                    if s.lower() == "gianluca"
+                    else pd.DataFrame(columns=["locatienummer", "handelingskosten"])
+                ),
                 allowed_products=allowed_products_by_supplier.get(s, None)
             )
 
@@ -599,7 +703,11 @@ else:
         supplier_name=selected_supplier,
         pricing_df=pricing_by_supplier[selected_supplier],
         rules=rules_by_supplier[selected_supplier],
-        gianluca_exceptions=gianluca_exceptions if selected_supplier.lower() == "gianluca" else pd.DataFrame(columns=["locatienummer", "handelingskosten"]),
+        gianluca_exceptions=(
+            gianluca_exceptions
+            if selected_supplier.lower() == "gianluca"
+            else pd.DataFrame(columns=["locatienummer", "handelingskosten"])
+        ),
         allowed_products=allowed_products_by_supplier.get(selected_supplier, None)
     )
 
