@@ -18,7 +18,7 @@ CANON_COLS = [
 
 DEFAULT_PRICING_ALL = pd.DataFrame([
     {"leverancier": "Recycling-Continue", "tarieftype": "per_stop", "prijs": 4.00, "afvalstroom": ""},
-    {"leverancier": "Gianluca",            "tarieftype": "per_stop", "prijs": 4.15, "afvalstroom": ""},
+    {"leverancier": "Gianluca",            "tarieftype": "per_stop", "prijs": 4.10, "afvalstroom": ""},
     {"leverancier": "Revema",              "tarieftype": "per_stop", "prijs": 4.00, "afvalstroom": ""},
     {"leverancier": "Gogogo",              "tarieftype": "per_stop", "prijs": 3.00, "afvalstroom": ""},
     {"leverancier": "Papierhandel Jansen", "tarieftype": "per_kiep", "prijs": 3.50, "afvalstroom": ""},
