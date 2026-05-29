@@ -26,12 +26,14 @@ DEFAULT_PRICING_ALL = pd.DataFrame([
     {"leverancier": "Visser Assen",        "tarieftype": "per_kiep", "prijs": 12.50, "afvalstroom": "Vertrouwelijk papier"},
     {"leverancier": "Schuman",             "tarieftype": "per_kiep", "prijs": 0.00,  "afvalstroom": ""},
     {"leverancier": "Van Bruchem",         "tarieftype": "per_kiep", "prijs": 4.00,  "afvalstroom": ""},
-    {"leverancier": "N.V. Reinigingsdiensten Rd4", "tarieftype": "per_kiep", "prijs": 17.14, "afvalstroom": ""}
+    #{"leverancier": "N.V. Reinigingsdiensten Rd4", "tarieftype": "per_kiep", "prijs": 17.14, "afvalstroom": ""},
+    {"leverancier": "Rowill", "tarieftype": "per_kiep", "prijs": 150.00,  "afvalstroom": ""},
 ])
 
 SUPPLIERS = [
     "Recycling-Continue", "Gianluca", "Revema", "Gogogo",
-    "Papierhandel Jansen", "Visser Assen", "Schuman", "Van Bruchem", "N.V. Reinigingsdiensten Rd4"
+    "Papierhandel Jansen", "Visser Assen", "Schuman", "Van Bruchem", "Rowill", #"N.V. Reinigingsdiensten Rd4"
+    
 ]
 
 SCHUMAN_PRICES = {
