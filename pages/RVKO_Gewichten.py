@@ -126,16 +126,20 @@ def pick_col(df, candidates):
 
 def pick_weight_col(df, candidates):
     """
-    Kiest de eerste kolom uit candidates die daadwerkelijk gevulde
-    (niet-lege) waarden bevat. Voorkomt dat er per ongeluk een lege
-    kolom (bijv. 'Netto gewicht' vol NaN) wordt gekozen boven een
-    gevulde kolom.
+    Kiest uit candidates de kolom die het meest gevuld is (meeste
+    niet-lege waarden). Voorkomt dat er per ongeluk een vrijwel lege
+    kolom (bijv. 'Netto gewicht' met slechts 1 gevulde waarde) wordt
+    gekozen boven een volledig gevulde kolom (bijv. 'Aantal').
+
+    Bij gelijke vulling wint de volgorde in candidates (voorkeur).
     """
-    for c in candidates:
-        if c in df.columns and df[c].notna().any():
-            return c
-    # fallback: eerste bestaande, ook al is die leeg
-    return pick_col(df, candidates)
+    aanwezig = [c for c in candidates if c in df.columns]
+    if not aanwezig:
+        return None
+    # sorteer op aantal gevulde waarden (hoog eerst), stabiel dus
+    # bij gelijkspel blijft de oorspronkelijke voorkeursvolgorde behouden
+    beste = max(aanwezig, key=lambda c: df[c].notna().sum())
+    return beste
 
 
 # ---------- Upload sectie ----------
