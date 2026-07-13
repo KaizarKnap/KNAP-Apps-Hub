@@ -8,7 +8,7 @@ from datetime import timedelta
 st.title("⚖️ RVKO Gewichten koppelen en controleren")
 
 st.write("""
-Deze app koppelt weeggegevens aan je data en vult automatisch de kolom **'Gewicht'** aan.  
+Deze app koppelt weeggegevens aan je data en vult automatisch de kolom **'Gewicht'** aan.
 Ondersteunt zowel het oude als het nieuwe leveranciersbestand.
 """)
 
@@ -18,7 +18,7 @@ def extract_volume(text):
     if pd.isna(text):
         return None
     s = str(text).lower()
-    m = re.search(r'(\d{2,4})\s*(l|ltr\.?|liter)\b', s)
+    m = re.search(r'(\d{2,4})\s*(?:l|ltr\.?|liter)\b', s)
     return int(m.group(1)) if m else None
 
 
@@ -37,10 +37,27 @@ def canon_afval(s):
 
 
 def norm_code(x):
-    """Normaliseert locatiecodes/referenties."""
+    """
+    Normaliseert locatiecodes/referenties naar een schone string.
+
+    BELANGRIJK: pandas leest numerieke kolommen soms in als float
+    (bijv. 624510059.0). Zonder correctie zou het strippen van de punt
+    een spookcijfer opleveren: '624510059.0' -> '6245100590', wat nooit
+    matcht met de int-versie '624510059'. Daarom eerst hele floats naar
+    int casten.
+    """
     if pd.isna(x):
         return None
+
+    # Float die eigenlijk een geheel getal is -> int (verwijdert de '.0')
+    if isinstance(x, float) and x.is_integer():
+        x = int(x)
+
     s = str(x).strip()
+
+    # Vangnet: een resterende '.0' aan het eind weghalen (bijv. bij tekst-floats)
+    s = re.sub(r'\.0+$', '', s)
+
     s = re.sub(r'[^0-9a-zA-Z]', '', s)
     return s if s else None
 
@@ -57,6 +74,10 @@ def clean_weight_value(x):
     """
     if pd.isna(x):
         return None
+
+    # Float die eigenlijk een geheel getal is -> int (voorkomt '90.0')
+    if isinstance(x, float) and x.is_integer():
+        x = int(x)
 
     s = str(x).strip()
     if s == "":
@@ -101,6 +122,20 @@ def pick_col(df, candidates):
         if c in df.columns:
             return c
     return None
+
+
+def pick_weight_col(df, candidates):
+    """
+    Kiest de eerste kolom uit candidates die daadwerkelijk gevulde
+    (niet-lege) waarden bevat. Voorkomt dat er per ongeluk een lege
+    kolom (bijv. 'Netto gewicht' vol NaN) wordt gekozen boven een
+    gevulde kolom.
+    """
+    for c in candidates:
+        if c in df.columns and df[c].notna().any():
+            return c
+    # fallback: eerste bestaande, ook al is die leeg
+    return pick_col(df, candidates)
 
 
 # ---------- Upload sectie ----------
@@ -155,7 +190,7 @@ if f_doel and f_bron:
     col_bron_datum = pick_col(df_bron, ["Datum", "Uitvoerdatum", "Uitvoer datum", "uitvoerdatum"])
     col_bron_container = pick_col(df_bron, ["container type", "Container type", "Verpakkingstype", "Inzamelmiddel", "Containertype"])
     col_bron_afval = pick_col(df_bron, ["afvalstof", "Afvalstof", "Product", "Afvalstroom"])
-    col_bron_gewicht = pick_col(df_bron, ["Hoeveelheid", "Gewicht", "Aantal", "Netto gewicht", "Gewicht (kg)"])
+    col_bron_gewicht = pick_weight_col(df_bron, ["Netto gewicht", "Gewicht (kg)", "Gewicht", "Hoeveelheid", "Aantal"])
     col_bron_loc = pick_col(df_bron, ["Referentie locatie van herkomst", "Locatienummer", "Locatiecode", "Referentie"])
 
     missing_bron = [name for name, col in {
@@ -173,6 +208,11 @@ if f_doel and f_bron:
             f"Gevonden kolommen: {list(df_bron.columns)}"
         )
         st.stop()
+
+    st.caption(
+        f"Gekozen gewichtskolom uit bron: **{col_bron_gewicht}** · "
+        f"locatiekolom bron: **{col_bron_loc}** · locatiekolom doel: **{col_doel_loc}**"
+    )
 
     df_bron["datum_dt"] = pd.to_datetime(df_bron[col_bron_datum], dayfirst=True, errors="coerce")
     df_bron["volume_tmp"] = df_bron[col_bron_container].apply(extract_volume)
@@ -249,6 +289,13 @@ if f_doel and f_bron:
 
     st.write("### 📊 Voorbeeld van ingevulde regels (eerste 15)")
     st.dataframe(df_result.head(15))
+
+    # ---------- Niet-gekoppelde regels uit DOEL ----------
+    onbekende_idx = [i for i, w in enumerate(new_weights) if pd.isna(w)]
+    if onbekende_idx:
+        st.write("### ⚠️ Regels uit het doelbestand zonder gewicht")
+        st.warning(f"{len(onbekende_idx)} regel(s) uit het doelbestand konden niet gekoppeld worden.")
+        st.dataframe(df_doel.iloc[onbekende_idx][originele_kolommen])
 
     # ---------- Niet-gebruikte regels uit BRON ----------
     hulpkolommen_bron = ["datum_dt", "volume_tmp", "afval_tmp", "loc_tmp", "gewicht_tmp", "used"]
