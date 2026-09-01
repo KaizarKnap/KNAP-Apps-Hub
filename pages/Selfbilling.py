@@ -31,9 +31,13 @@ DEFAULT_PRICING_ALL = pd.DataFrame([
     {"leverancier": "Van Bruchem",         "tarieftype": "per_kiep", "prijs": 4.00,  "afvalstroom": ""},
     #{"leverancier": "N.V. Reinigingsdiensten Rd4", "tarieftype": "per_kiep", "prijs": 17.14, "afvalstroom": ""},
     {"leverancier": "Rowill", "tarieftype": "per_kiep", "prijs": 150.00,  "afvalstroom": ""},
-    # Bal en Meertens: vast bedrag per uitgevoerde container, ongeacht abonnement of afroep.
-    {"leverancier": "Bal Recycling",       "tarieftype": "per_kiep", "prijs": 3.50,  "afvalstroom": ""},
+    # Bal: EUR 3,50 per stop. Meerdere ledigingen op dezelfde dag en locatie
+    # leveren samen een stop op, dus niet per container vermenigvuldigen.
+    {"leverancier": "Bal Recycling",       "tarieftype": "per_stop", "prijs": 3.50,  "afvalstroom": ""},
+    # Meertens: per lediging. Swill EUR 18,50, frituurvet EUR 0,00
+    # (de regel met afvalstroom gaat voor op de algemene regel).
     {"leverancier": "Meertens",            "tarieftype": "per_kiep", "prijs": 18.50, "afvalstroom": ""},
+    {"leverancier": "Meertens",            "tarieftype": "per_kiep", "prijs": 0.00,  "afvalstroom": "Frituurvet"},
 ])
 
 SUPPLIERS = [
@@ -49,6 +53,12 @@ SUPPLIER_MATCH = {
     "Bal Recycling": "bal recycling",
     "Meertens": "meertens",
 }
+
+# Leveranciers die per stop betaald worden: meerdere orderregels op dezelfde
+# dag en hetzelfde locatienummer leveren samen één stopvergoeding op.
+PER_STOP_DEDUP_SUPPLIERS = (
+    "recycling-continue", "gianluca", "revema", "gogogo", "bal recycling",
+)
 
 SCHUMAN_PRICES = {
     ("240L", "Restafval"): 8.93,
@@ -493,7 +503,7 @@ def process_supplier(
         elif rules.get("rule_client_msn_minpay", True) and verantwoordelijke in ("client", "msn") and bedrag == 0 and prijs > 0:
             bedrag = prijs
 
-        if rules.get("rule_dedup_per_stop", True) and supplier in ("recycling-continue", "gianluca", "revema", "gogogo"):
+        if rules.get("rule_dedup_per_stop", True) and supplier in PER_STOP_DEDUP_SUPPLIERS:
             loc_key = normalize_loc(row.get("Locatienummer", ""))
 
             ophaal_raw = row.get("Ophaaldatum", None)
