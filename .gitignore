@@ -1,0 +1,6 @@
+.venv/
+__pycache__/
+*.pyc
+
+# Leveranciers-tarieven staan bewust NIET in git: deze repo is publiek.
+data/tarieven/

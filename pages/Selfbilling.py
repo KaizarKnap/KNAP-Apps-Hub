@@ -1,5 +1,8 @@
+import hashlib
 import io
 import zipfile
+from pathlib import Path
+
 import pandas as pd
 import streamlit as st
 
@@ -28,13 +31,24 @@ DEFAULT_PRICING_ALL = pd.DataFrame([
     {"leverancier": "Van Bruchem",         "tarieftype": "per_kiep", "prijs": 4.00,  "afvalstroom": ""},
     #{"leverancier": "N.V. Reinigingsdiensten Rd4", "tarieftype": "per_kiep", "prijs": 17.14, "afvalstroom": ""},
     {"leverancier": "Rowill", "tarieftype": "per_kiep", "prijs": 150.00,  "afvalstroom": ""},
+    # Bal en Meertens: vast bedrag per uitgevoerde container, ongeacht abonnement of afroep.
+    {"leverancier": "Bal Recycling",       "tarieftype": "per_kiep", "prijs": 3.50,  "afvalstroom": ""},
+    {"leverancier": "Meertens",            "tarieftype": "per_kiep", "prijs": 18.50, "afvalstroom": ""},
 ])
 
 SUPPLIERS = [
     "Recycling-Continue", "Gianluca", "Revema", "Gogogo",
     "Papierhandel Jansen", "Visser Assen", "Schuman", "Van Bruchem", "Rowill", #"N.V. Reinigingsdiensten Rd4"
-    
+    "Bal Recycling", "Meertens",
 ]
+
+# Zoekterm per leverancier voor de kolom 'Leverancier' in het orderbestand.
+# Nodig waar de naam in SUPPLIERS afwijkt van de naam in de MSN-export
+# (bv. " J. Meertens & Zn. B.V." en "Bal Recycling B.V.").
+SUPPLIER_MATCH = {
+    "Bal Recycling": "bal recycling",
+    "Meertens": "meertens",
+}
 
 SCHUMAN_PRICES = {
     ("240L", "Restafval"): 8.93,
@@ -78,6 +92,7 @@ DEFAULT_RULES = {
     "rule_vanbruchem_pers_92": True,
     "rule_vanbruchem_add_kg_row": True,
     "rule_brandstoftoeslag": False,
+    "rule_lege_uitgevoerd_nul": False,
 }
 
 DEFAULT_KEYWORDS = ["balen", "zakken", "afzet", "pers"]
@@ -89,16 +104,41 @@ VAN_BRUCHEM_PERS_PRICES = {
 }
 
 # -------------------- HELPERS --------------------
+# Kolomnamen zoals ze exact in een MSN-export staan. Wordt gebruikt om de
+# echte kopregel te vinden: MSN zet boven de tabel vaak een filterbanner
+# ("Toegepaste filters: [Leverancier] is ..."). Zoeken op 'bevat Leverancier'
+# pakt dan die banner en de hele inlezing loopt mis.
+HEADER_HINTS = {
+    "ophaaldatum", "locatienummer", "debiteurnummer", "leverancier", "klantnaam",
+    "klanttype", "dienst logistiek", "status", "productomschrijving", "artikelcode",
+    "afvalstroom", "gewicht", "straat", "huisnr", "postcode", "plaats",
+    "verantwoordelijke partij", "volume", "inzamelmiddel", "ophaaldag",
+    "# uitgevoerd", "# gepland", "uitgevoerd", "gepland",
+}
+
+
+def _header_score(cells) -> int:
+    """Aantal cellen in een rij dat exact een bekende kolomnaam is."""
+    return sum(
+        1 for v in cells
+        if str(v).strip().replace("\u00A0", " ").lower() in HEADER_HINTS
+    )
+
+
 @st.cache_data(show_spinner=False)
 def read_excel(file):
-    preview = pd.read_excel(file, nrows=10, header=None)
-    header_row = preview.apply(
-        lambda r: r.astype(str).str.contains("Leverancier|Afvalstroom", case=False, na=False)
-    ).any(axis=1)
-    header_index = header_row.idxmax() if header_row.any() else 0
+    preview = pd.read_excel(file, nrows=15, header=None)
+    scores = preview.apply(lambda r: _header_score(r.tolist()), axis=1)
+
+    # Minstens 3 exacte treffers, anders is het geen kopregel maar losse tekst.
+    header_index = int(scores.idxmax()) if scores.max() >= 3 else 0
     df = pd.read_excel(file, header=header_index)
 
     df.columns = [str(c).strip().replace("\u00A0", " ") for c in df.columns]
+
+    # Lege hulpkolommen en de losse voettekst ("Toegepaste filters: ...") weg.
+    df = df.loc[:, [not str(c).startswith("Unnamed") for c in df.columns]]
+    df = df.dropna(axis=0, how="all")
 
     alias_map = {
         "# uitgevoerd": "Uitgevoerd",
@@ -121,6 +161,58 @@ def get_col(df, hint):
         if hint.lower() in str(c).lower():
             return c
     return None
+
+
+def supplier_rows_mask(df: pd.DataFrame, supplier_col: str, supplier_name: str):
+    """Rijen van één leverancier. regex=False, anders worden '.' en '(' in een
+    leveranciersnaam als regex uitgelegd."""
+    zoek = SUPPLIER_MATCH.get(supplier_name, supplier_name).lower()
+    return df[supplier_col].astype(str).str.lower().str.contains(zoek, regex=False, na=False)
+
+
+def stable_key(s) -> str:
+    """Stabiele sleutel voor Streamlit-widgets. hash() van een string wisselt
+    per Python-proces, waardoor toggle-standen na een herstart verspringen."""
+    return hashlib.md5(str(s).encode("utf-8")).hexdigest()[:12]
+
+
+# Map met tarievenexports uit MSN ("Tarieven <leverancier>.xlsx").
+# Puur ter controle: de app rekent met de tarieven uit de tarievenkaart hierboven.
+# Deze lijst laat zien welke producten de leverancier officieel voert, zodat
+# nieuwe of gewijzigde productomschrijvingen opvallen.
+TARIEVEN_DIR = Path(__file__).resolve().parent.parent / "data" / "tarieven"
+
+
+@st.cache_data(show_spinner=False)
+def load_tarieflijst(bron) -> pd.DataFrame:
+    """Leest een MSN-tarievenexport. Geeft een lege DataFrame bij problemen."""
+    try:
+        df = pd.read_excel(bron)
+    except Exception:
+        return pd.DataFrame()
+
+    df.columns = [str(c).strip() for c in df.columns]
+    kolommen = ["Leverancier", "Productomschrijving", "Basistarief", "Afvalstroom", "Inzamelmiddel"]
+    aanwezig = [c for c in kolommen if c in df.columns]
+    if "Productomschrijving" not in aanwezig:
+        return pd.DataFrame()
+
+    df = df[aanwezig].copy()
+    df = df[df["Productomschrijving"].notna()]
+    df["Productomschrijving"] = df["Productomschrijving"].astype(str).str.strip()
+    return df.reset_index(drop=True)
+
+
+def tarieflijst_voor(supplier_name: str) -> pd.DataFrame:
+    """Zoekt in data/tarieven naar de export van deze leverancier."""
+    if not TARIEVEN_DIR.is_dir():
+        return pd.DataFrame()
+
+    zoek = SUPPLIER_MATCH.get(supplier_name, supplier_name).lower()
+    for pad in sorted(TARIEVEN_DIR.glob("*.xls*")):
+        if zoek in pad.stem.lower():
+            return load_tarieflijst(str(pad))
+    return pd.DataFrame()
 
 
 def normalize_afvalstroom(v):
@@ -157,24 +249,36 @@ def normalize_loc(l):
     return s
 
 
-def units_from_row(row, tarieftype):
-    val = row.get("Uitgevoerd", 0)
-    if tarieftype == "per_kiep":
-        try:
-            return int(val)
-        except Exception:
-            return 1 if str(val).strip() else 0
-    return 1 if str(val).strip() else 0
+def units_from_row(row, tarieftype, lege_uitgevoerd_nul: bool = False):
+    n = pd.to_numeric(row.get("Uitgevoerd", None), errors="coerce")
+
+    if pd.isna(n):
+        # Geen (leesbaar) aantal ingevuld. Standaard blijft het historische
+        # gedrag: er ligt een order, dus tel 1 eenheid. Zet de regel
+        # 'lege_uitgevoerd_nul' aan om zulke regels op 0 te zetten.
+        return 0 if lege_uitgevoerd_nul else 1
+
+    return max(int(n), 0) if tarieftype == "per_kiep" else (1 if n > 0 else 0)
 
 
 def match_price(row, pricing_df, supplier):
     afst = str(row.get("Afvalstroom", "")).strip()
-    df = pricing_df[pricing_df["leverancier"].str.lower().str.contains(supplier.lower())]
+    zoek = SUPPLIER_MATCH.get(supplier, supplier).lower()
+    df = pricing_df[
+        pricing_df["leverancier"].astype(str).str.lower().str.contains(zoek, regex=False, na=False)
+    ]
 
-    if supplier.lower() == "visser assen":
-        for _, r in df.iterrows():
-            if str(r.get("afvalstroom", "")).lower() == str(afst).lower():
-                return {"tarieftype": "per_kiep", "prijs": float(r["prijs"])}
+    # Tarief per afvalstroom gaat voor op het algemene tarief van de leverancier.
+    for _, r in df.iterrows():
+        afst_regel = str(r.get("afvalstroom", "")).strip()
+        if afst_regel and afst_regel.lower() == afst.lower():
+            return {"tarieftype": r["tarieftype"], "prijs": float(r["prijs"])}
+
+    # Anders de eerste regel zonder afvalstroom (het algemene tarief).
+    algemeen = df[df["afvalstroom"].astype(str).str.strip() == ""]
+    if not algemeen.empty:
+        r = algemeen.iloc[0]
+        return {"tarieftype": r["tarieftype"], "prijs": float(r["prijs"])}
 
     if not df.empty:
         r = df.iloc[0]
@@ -233,7 +337,7 @@ def export_excel_bytes(out_df: pd.DataFrame) -> bytes:
             bedrag_range = f"{excel_col(bedrag_col)}2:{excel_col(bedrag_col)}{last_row - 1}"
 
             worksheet.write(label_cell, "Totaal te ontvangen bedrag")
-            worksheet.write_array_formula(f"{bedrag_cell}:{bedrag_cell}", f"=SOM({bedrag_range})")
+            worksheet.write_formula(bedrag_cell, f"=SUM({bedrag_range})")
 
     buf.seek(0)
     return buf.getvalue()
@@ -283,7 +387,7 @@ def process_supplier(
     if not supplier_col:
         return pd.DataFrame()
 
-    data = data_all[data_all[supplier_col].astype(str).str.lower().str.contains(supplier)].copy()
+    data = data_all[supplier_rows_mask(data_all, supplier_col, supplier_name)].copy()
     if data.empty:
         return pd.DataFrame()
 
@@ -291,6 +395,11 @@ def process_supplier(
     data = apply_product_filter(data, product_col, allowed_products)
     if data.empty:
         return pd.DataFrame()
+
+    # Kolomnamen één keer opzoeken in plaats van per rij.
+    vol_col = get_col(data, "volume")
+    afst_col = get_col(data, "afvalstroom")
+    lege_nul = rules.get("rule_lege_uitgevoerd_nul", False)
 
     loc_dict = {}
     if supplier == "gianluca" and rules.get("rule_gianluca_handlingskosten", True):
@@ -304,10 +413,7 @@ def process_supplier(
     seen_per_stop = set()
 
     for _, row in data.iterrows():
-        product_col_local = next((c for c in data.columns if "productomschrijving" in str(c).lower()), None)
-        prod_txt = str(row.get(product_col_local, "")) if product_col_local else ""
-        vol_col = get_col(data, "volume")
-        afst_col = get_col(data, "afvalstroom")
+        prod_txt = str(row.get(product_col, "")) if product_col else ""
         vol_any = normalize_volume_any(row.get(vol_col, "")) if vol_col else ""
         afst_norm = normalize_afvalstroom(row.get(afst_col, "")) if afst_col else ""
 
@@ -323,13 +429,13 @@ def process_supplier(
             volume = normalize_volume(row.get(vol_col, "")) if vol_col else ""
             afst = normalize_afvalstroom(row.get(afst_col, "")) if afst_col else ""
             prijs = float(SCHUMAN_PRICES.get((volume, afst), 0.0))
-            qty = units_from_row(row, ttype)
+            qty = units_from_row(row, ttype, lege_nul)
             bedrag = prijs * qty
 
         elif supplier == "gianluca":
             info = match_price(row, pricing_df, supplier_name)
             prijs = float(info["prijs"])
-            qty = units_from_row(row, info["tarieftype"])
+            qty = units_from_row(row, info["tarieftype"], lege_nul)
             bedrag = prijs if qty > 0 else 0.0
 
             if rules.get("rule_gianluca_handlingskosten", True):
@@ -341,13 +447,13 @@ def process_supplier(
         elif supplier == "visser assen":
             info = match_price(row, pricing_df, supplier_name)
             prijs = float(info["prijs"])
-            qty = units_from_row(row, info["tarieftype"])
+            qty = units_from_row(row, info["tarieftype"], lege_nul)
             bedrag = prijs * qty
 
         elif supplier == "van bruchem":
             info = match_price(row, pricing_df, supplier_name)
             prijs = float(info["prijs"])
-            qty = units_from_row(row, info["tarieftype"])
+            qty = units_from_row(row, info["tarieftype"], lege_nul)
             bedrag = prijs if info["tarieftype"] == "per_stop" and qty > 0 else prijs * qty
 
             # Pers-prijzen per plaats, alleen bij uitgevoerd.
@@ -374,7 +480,7 @@ def process_supplier(
         else:
             info = match_price(row, pricing_df, supplier_name)
             prijs = float(info["prijs"])
-            qty = units_from_row(row, info["tarieftype"])
+            qty = units_from_row(row, info["tarieftype"], lege_nul)
             bedrag = prijs if info["tarieftype"] == "per_stop" and qty > 0 else prijs * qty
 
         verantwoordelijke = str(row.get("Verantwoordelijke partij", "")).strip().lower()
@@ -437,6 +543,15 @@ def process_supplier(
     return pd.DataFrame(results)
 
 
+def toon_samenvatting(out_df: pd.DataFrame, label: str) -> None:
+    """Totaal, aantal regels en nulregels, zodat je niet eerst de Excel hoeft te openen."""
+    bedrag = pd.to_numeric(out_df.get("Bedrag"), errors="coerce").fillna(0.0)
+    c1, c2, c3 = st.columns(3)
+    c1.metric(f"Totaal {label}", f"€ {bedrag.sum():,.2f}".replace(",", "@").replace(".", ",").replace("@", "."))
+    c2.metric("Regels", f"{len(out_df)}")
+    c3.metric("Regels € 0,00", f"{int((bedrag == 0).sum())}")
+
+
 # -------------------- UI: MODE --------------------
 mode = st.radio(
     "Kies modus:",
@@ -463,7 +578,10 @@ gianluca_exceptions = DEFAULT_GIANLUCA_LOCS.copy()
 
 
 def supplier_pricing_default(s: str) -> pd.DataFrame:
-    return DEFAULT_PRICING_ALL[DEFAULT_PRICING_ALL["leverancier"].str.lower().str.contains(s.lower())].reset_index(drop=True)
+    zoek = SUPPLIER_MATCH.get(s, s).lower()
+    return DEFAULT_PRICING_ALL[
+        DEFAULT_PRICING_ALL["leverancier"].str.lower().str.contains(zoek, regex=False, na=False)
+    ].reset_index(drop=True)
 
 
 def supplier_rules_editor(s: str, key_prefix: str) -> dict:
@@ -495,6 +613,16 @@ def supplier_rules_editor(s: str, key_prefix: str) -> dict:
             value=r["rule_brandstoftoeslag"],
             key=f"{key_prefix}_brandstoftoeslag",
             help="Voegt per order een extra Excel-regel toe: Papier/Karton €0,61 per stop, Restafval 2,5%, Transportkosten 7%."
+        )
+        r["rule_lege_uitgevoerd_nul"] = st.checkbox(
+            "Lege kolom 'Uitgevoerd' => 0 eenheden (i.p.v. 1)",
+            value=r["rule_lege_uitgevoerd_nul"],
+            key=f"{key_prefix}_legeuitgevoerd",
+            help=(
+                "Staat deze uit, dan telt een order zonder ingevuld aantal als 1 eenheid. "
+                "Bij per_kiep-leveranciers wordt zo'n regel dan volledig betaald. "
+                "Zet aan om alleen te betalen wat aantoonbaar is uitgevoerd."
+            )
         )
 
         if s.lower() == "gianluca":
@@ -596,6 +724,28 @@ if not supplier_col:
 
 product_col_all = next((c for c in data_all.columns if "productomschrijving" in str(c).lower()), None)
 
+# -------------------- CONTROLE OP HERKENDE LEVERANCIERS --------------------
+gekoppeld = pd.Series(False, index=data_all.index)
+for _s in SUPPLIERS:
+    gekoppeld |= supplier_rows_mask(data_all, supplier_col, _s)
+
+st.success(f"✅ {len(data_all)} orderregels ingelezen uit {len(files)} bestand(en).")
+
+if (~gekoppeld).any():
+    onbekend = (
+        data_all.loc[~gekoppeld, supplier_col]
+        .astype(str).str.strip().value_counts()
+    )
+    st.warning(
+        f"⚠️ {int((~gekoppeld).sum())} regels horen bij een leverancier die niet in de app staat "
+        "en verschijnen dus op geen enkele self-billing."
+    )
+    with st.expander("Welke leveranciers zijn niet gekoppeld?", expanded=False):
+        st.dataframe(
+            onbekend.rename_axis("Leverancier").reset_index(name="Aantal regels"),
+            use_container_width=True,
+        )
+
 # -------------------- PRODUCT FILTERS: PER LEVERANCIER (TOGGLES) --------------------
 allowed_products_by_supplier: dict[str, set | None] = {}
 
@@ -626,7 +776,7 @@ def compute_allowed_products_toggles(df_sup: pd.DataFrame, supplier_name: str) -
     if impacted:
         cols = st.columns(2)
         for i, prod in enumerate(impacted):
-            key = f"tgl_{supplier_name}_{hash(prod)}"
+            key = f"tgl_{supplier_name}_{stable_key(prod)}"
             with cols[i % 2]:
                 if st.toggle(prod, value=True, key=key):
                     active_impacted.append(prod)
@@ -638,7 +788,45 @@ def compute_allowed_products_toggles(df_sup: pd.DataFrame, supplier_name: str) -
     if excluded:
         st.warning(f"🚫 Uitgesloten (trefwoord): {len(excluded)}")
 
+    toon_tarieflijst_controle(products_all, supplier_name)
+
     return allowed
+
+
+def toon_tarieflijst_controle(products_in_orders: list, supplier_name: str) -> None:
+    """Vergelijkt de productomschrijvingen in het orderbestand met de officiele
+    tarievenexport van de leverancier, als die beschikbaar is."""
+    tarieven = tarieflijst_voor(supplier_name)
+
+    upload = st.file_uploader(
+        f"Tarievenexport {supplier_name} (optioneel, ter controle)",
+        type=["xlsx", "xls"],
+        key=f"tarieven_{stable_key(supplier_name)}",
+        help="Export uit MSN: 'Tarieven <leverancier>.xlsx'. Overschrijft het bestand uit data/tarieven.",
+    )
+    if upload is not None:
+        tarieven = load_tarieflijst(upload)
+
+    if tarieven.empty:
+        return
+
+    bekend = set(tarieven["Productomschrijving"].str.strip())
+    onbekend = sorted(p for p in products_in_orders if str(p).strip() not in bekend)
+
+    with st.expander(f"📋 Tarieflijst {supplier_name} ({len(bekend)} producten)", expanded=False):
+        if onbekend:
+            st.warning(
+                f"⚠️ {len(onbekend)} productomschrijving(en) in het orderbestand staan niet "
+                "in de tarievenlijst. Controleer of het tarief nog klopt."
+            )
+            st.dataframe(
+                pd.DataFrame({"Niet in tarievenlijst": onbekend}),
+                use_container_width=True,
+            )
+        else:
+            st.success("✅ Alle productomschrijvingen komen voor in de tarievenlijst.")
+
+        st.dataframe(tarieven, use_container_width=True)
 
 
 if process_all:
@@ -647,20 +835,20 @@ if process_all:
 
     present_suppliers = [
         s for s in SUPPLIERS
-        if data_all[supplier_col].astype(str).str.lower().str.contains(s.lower()).any()
+        if supplier_rows_mask(data_all, supplier_col, s).any()
     ]
     if not present_suppliers:
         st.warning("Geen bekende leveranciers gevonden in dit bestand.")
         st.stop()
 
     for s in present_suppliers:
-        df_sup = data_all[data_all[supplier_col].astype(str).str.lower().str.contains(s.lower())].copy()
+        df_sup = data_all[supplier_rows_mask(data_all, supplier_col, s)].copy()
         with st.expander(f"Productomschrijvingen: {s}", expanded=False):
             allowed_products_by_supplier[s] = compute_allowed_products_toggles(df_sup, supplier_name=s)
 
 else:
     st.subheader("🧩 Productomschrijvingen (geselecteerde leverancier)")
-    df_sup = data_all[data_all[supplier_col].astype(str).str.lower().str.contains(selected_supplier.lower())].copy()
+    df_sup = data_all[supplier_rows_mask(data_all, supplier_col, selected_supplier)].copy()
     allowed_products_by_supplier[selected_supplier] = compute_allowed_products_toggles(df_sup, supplier_name=selected_supplier)
 
 # -------------------- RUN --------------------
@@ -687,7 +875,8 @@ if process_all:
                 st.markdown(f"**{s}** — geen regels na filtering.")
                 continue
 
-            st.markdown(f"**{s}** — {len(out_df)} regels")
+            st.markdown(f"**{s}**")
+            toon_samenvatting(out_df, s)
             st.dataframe(out_df.head(20), use_container_width=True)
 
             xbytes = export_excel_bytes(out_df)
@@ -717,6 +906,12 @@ else:
     )
 
     st.subheader("Bekijk en exporteer resultaat")
+
+    if out_df.empty:
+        st.warning("Geen regels voor deze leverancier na filtering.")
+        st.stop()
+
+    toon_samenvatting(out_df, selected_supplier)
     st.dataframe(out_df.head(40), use_container_width=True)
 
     xbytes = export_excel_bytes(out_df)
