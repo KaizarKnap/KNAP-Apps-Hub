@@ -93,6 +93,23 @@ DEFAULT_GIANLUCA_LOCS = pd.DataFrame([
     {"locatienummer": "612540001", "handelingskosten": 15.61},
 ])
 
+# Km-heffing (vrachtwagenheffing) per leverancier, naast de brandstoftoeslag.
+#   haakarm_pct      = percentage over het orderbedrag van transportregels
+#                      (productomschrijving bevat "Transport")
+#   karton_per_stop  = vast bedrag per stop bij een lediging Papier/Karton,
+#                      dus niet op transportregels en niet per container
+# Leveranciers die hier niet in staan krijgen geen km-heffing:
+#   Papierhandel Jansen  - geen km-heffing afgesproken
+#   Rowill               - geen afspraken gemaakt
+#   Gianluca, Gogogo, Bal Recycling, Meertens - afspraak nog niet bekend
+KM_HEFFING = {
+    "Van Bruchem":        {"haakarm_pct": 0.04, "karton_per_stop": 0.20},
+    "Recycling-Continue": {"haakarm_pct": 0.03, "karton_per_stop": 0.20},
+    "Revema":             {"haakarm_pct": 0.00, "karton_per_stop": 0.20},
+    "Schuman":            {"haakarm_pct": 0.00, "karton_per_stop": 0.20},
+    "Visser Assen":       {"haakarm_pct": 0.00, "karton_per_stop": 0.20},
+}
+
 DEFAULT_RULES = {
     "rule_status_zero": True,
     "rule_partner_zero": True,
@@ -103,6 +120,7 @@ DEFAULT_RULES = {
     "rule_vanbruchem_add_kg_row": True,
     "rule_brandstoftoeslag": False,
     "rule_lege_uitgevoerd_nul": False,
+    "rule_km_heffing": True,
 }
 
 DEFAULT_KEYWORDS = ["balen", "zakken", "afzet", "pers"]
@@ -259,6 +277,15 @@ def normalize_loc(l):
     return s
 
 
+def stop_key(row):
+    """Sleutel voor 'een stop': ophaaldag + locatienummer."""
+    loc_key = normalize_loc(row.get("Locatienummer", ""))
+    ophaal_raw = row.get("Ophaaldatum", None)
+    ophaal_dt = pd.to_datetime(ophaal_raw, errors="coerce")
+    dag_key = ophaal_dt.date().isoformat() if pd.notna(ophaal_dt) else str(ophaal_raw).strip()
+    return (dag_key, loc_key)
+
+
 def units_from_row(row, tarieftype, lege_uitgevoerd_nul: bool = False):
     n = pd.to_numeric(row.get("Uitgevoerd", None), errors="coerce")
 
@@ -383,6 +410,45 @@ def calc_brandstoftoeslag(row, bedrag):
     return 0.0, ""
 
 
+def is_transportregel(prod_txt: str) -> bool:
+    """Haakarm-/transportrit. Het woord 'haakarm' staat niet in de MSN-export;
+    deze ritten heten daar 'Transport perscontainer 23m3' en soortgelijk."""
+    return "transport" in str(prod_txt).lower()
+
+
+def calc_km_heffing(row, bedrag, supplier_name, prod_txt, afst_norm, seen_karton_stops):
+    """
+    Km-heffing (vrachtwagenheffing) per order, naast de brandstoftoeslag.
+    - Transportregels: percentage over het orderbedrag (Van Bruchem 4%,
+      Recycling-Continue 3%).
+    - Ledigingen Papier/Karton: vast bedrag per stop, dus eenmaal per
+      ophaaldag + locatienummer en niet per container.
+
+    Het percentage rekent over het kale orderbedrag, niet over de
+    brandstoftoeslag heen, zodat de rekenvolgorde niet uitmaakt.
+    """
+    afspraak = KM_HEFFING.get(supplier_name)
+    if not afspraak:
+        return 0.0, ""
+
+    if is_transportregel(prod_txt):
+        pct = float(afspraak.get("haakarm_pct", 0.0))
+        if pct <= 0:
+            return 0.0, ""
+        return round(float(bedrag) * pct, 2), f"Km-heffing haakarm {pct * 100:.0f}%"
+
+    per_stop = float(afspraak.get("karton_per_stop", 0.0))
+    if per_stop <= 0 or afst_norm != "Papier/Karton":
+        return 0.0, ""
+
+    sleutel = stop_key(row)
+    if sleutel in seen_karton_stops:
+        return 0.0, ""
+
+    seen_karton_stops.add(sleutel)
+    return per_stop, "Km-heffing karton lediging per stop"
+
+
 def process_supplier(
     data_all: pd.DataFrame,
     supplier_name: str,
@@ -421,6 +487,7 @@ def process_supplier(
 
     results = []
     seen_per_stop = set()
+    seen_karton_stops = set()
 
     for _, row in data.iterrows():
         prod_txt = str(row.get(product_col, "")) if product_col else ""
@@ -504,19 +571,13 @@ def process_supplier(
             bedrag = prijs
 
         if rules.get("rule_dedup_per_stop", True) and supplier in PER_STOP_DEDUP_SUPPLIERS:
-            loc_key = normalize_loc(row.get("Locatienummer", ""))
-
-            ophaal_raw = row.get("Ophaaldatum", None)
-            ophaal_dt = pd.to_datetime(ophaal_raw, errors="coerce")
-            dag_key = ophaal_dt.date().isoformat() if pd.notna(ophaal_dt) else str(ophaal_raw).strip()
-
-            stop_key = (dag_key, loc_key)
+            sleutel = stop_key(row)
 
             if bedrag > 0 and prijs > 0 and abs(bedrag - prijs) < 1e-9:
-                if stop_key in seen_per_stop:
+                if sleutel in seen_per_stop:
                     bedrag = 0.0
                 else:
-                    seen_per_stop.add(stop_key)
+                    seen_per_stop.add(sleutel)
 
         base_row = {
             **{c: row.get(c, None) for c in CANON_COLS if c in data.columns},
@@ -539,6 +600,27 @@ def process_supplier(
                     "Bedrag": toeslag_bedrag
                 }
                 results.append(toeslag_row)
+
+        # Km-heffing als extra orderregel, naast de brandstoftoeslag.
+        if rules.get("rule_km_heffing", True) and bedrag > 0:
+            km_bedrag, km_omschrijving = calc_km_heffing(
+                row=row,
+                bedrag=bedrag,
+                supplier_name=supplier_name,
+                prod_txt=prod_txt,
+                afst_norm=afst_norm,
+                seen_karton_stops=seen_karton_stops,
+            )
+
+            if km_bedrag > 0:
+                km_row = {
+                    **{c: row.get(c, None) for c in CANON_COLS if c in data.columns},
+                    "Kilogram": None,
+                    "Productomschrijving": km_omschrijving,
+                    "Prijs per stuk": km_bedrag,
+                    "Bedrag": km_bedrag
+                }
+                results.append(km_row)
 
         if supplier == "van bruchem" and rules.get("rule_vanbruchem_add_kg_row", True) and is_vanbruchem_pers_23_pk:
             kg_row = {
@@ -624,6 +706,24 @@ def supplier_rules_editor(s: str, key_prefix: str) -> dict:
             key=f"{key_prefix}_brandstoftoeslag",
             help="Voegt per order een extra Excel-regel toe: Papier/Karton €0,61 per stop, Restafval 2,5%, Transportkosten 7%."
         )
+        afspraak = KM_HEFFING.get(s)
+        r["rule_km_heffing"] = st.checkbox(
+            "Km-heffing toevoegen per order",
+            value=r["rule_km_heffing"],
+            key=f"{key_prefix}_kmheffing",
+            help="Voegt een extra Excel-regel toe met de vrachtwagenheffing, naast de brandstoftoeslag."
+        )
+        if afspraak:
+            regels = []
+            if afspraak.get("haakarm_pct", 0):
+                regels.append(f"{afspraak['haakarm_pct'] * 100:.0f}% over transport-/haakarmregels")
+            if afspraak.get("karton_per_stop", 0):
+                bedrag_txt = f"{afspraak['karton_per_stop']:.2f}".replace(".", ",")
+                regels.append(f"€ {bedrag_txt} per stop bij lediging Papier/Karton")
+            st.caption("Afspraak km-heffing: " + " en ".join(regels) + ".")
+        else:
+            st.caption("Geen km-heffing afgesproken voor deze leverancier.")
+
         r["rule_lege_uitgevoerd_nul"] = st.checkbox(
             "Lege kolom 'Uitgevoerd' => 0 eenheden (i.p.v. 1)",
             value=r["rule_lege_uitgevoerd_nul"],
