@@ -1,4 +1,10 @@
-# Inloggen op de KNAP Apps Hub
+# Inloggen met een Microsoft-account
+
+> Dit is de **beste** manier, maar hij vereist eenmalig een app-registratie in
+> Entra ID en dus mogelijk hulp van IT. Wil je collega's vandaag aan het werk
+> hebben, begin dan met [INLOGGEN-WACHTWOORD.md](INLOGGEN-WACHTWOORD.md) en kom
+> hier later terug. Overstappen kost geen verbouwing: je vult alleen andere
+> velden in de instellingen in.
 
 Collega's loggen in met hun eigen Microsoft-werkaccount (Entra ID). Er zijn dus
 geen wachtwoorden die wij zelf uitdelen, opslaan of resetten: wie al op zijn
@@ -52,26 +58,69 @@ op te vragen.
 
 ### 4. secrets.toml vullen
 
-Kopieer `.streamlit/secrets.toml.example` naar `.streamlit/secrets.toml` en vul
-`client_id`, `client_secret` en het tenant-ID in. Genereer daarnaast een
-`cookie_secret`:
+`.streamlit/secrets.toml` staat al klaar met een gegenereerd `cookie_secret`.
+Er moeten nog drie waarden in, alle drie uit stap 2 en 3:
 
-```bash
-python -c "import secrets; print(secrets.token_hex(32))"
+| Veld | Waar het vandaan komt |
+| --- | --- |
+| `client_id` | Toepassings-id (client), tabblad Overzicht |
+| `client_secret` | De **waarde** van het clientgeheim uit stap 3 |
+| `server_metadata_url` | Vervang `TENANT_ID` door het Directory-id (tenant) |
+
+Zolang er nog voorbeeldtekst in een van de vijf verplichte velden staat, telt
+dat veld als leeg en houdt de app zichzelf dicht met het uitlegscherm. Dat is
+bewust: een half ingevulde configuratie zou anders met een Authlib-foutmelding
+crashen.
+
+Moet je zelf een nieuw `cookie_secret` maken? In PowerShell, zonder Python:
+
+```powershell
+$b = New-Object byte[] 32; [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); ($b | ForEach-Object { $_.ToString('x2') }) -join ''
 ```
 
-### 5. Live zetten
+### 5. Live zetten op Streamlit Community Cloud
 
-Op de server plak je dezelfde inhoud in het secrets-veld van de hosting
-(bij Streamlit Cloud: **Settings → Secrets**) in plaats van in een bestand.
-Twee dingen moeten dan mee:
+**Doe dit in deze volgorde.** Je hebt het definitieve app-adres nodig vóórdat
+je de omleidings-URI in Entra ID kunt invullen, en dat adres kies je pas bij het
+deployen. Achteraf een subdomein wijzigen breekt het inloggen.
 
-1. `redirect_uri` wordt `https://<jouw-app-adres>/oauth2callback`
-2. datzelfde adres moet je in Entra ID toevoegen onder
-   **Verificatie → Omleidings-URI's**
+1. **App-adres vastleggen.** Draait de app al op
+   [share.streamlit.io](https://share.streamlit.io)? Neem dan het bestaande
+   adres over. Zo niet: deploy hem vanaf de repo (`Home.py` als hoofdbestand) en
+   kies bij **Custom subdomain** een naam die je niet meer wilt veranderen,
+   bijvoorbeeld `knap-apps`. Je adres is dan
+   `https://knap-apps.streamlit.app`.
 
-Lokaal en live mogen naast elkaar bestaan: zet beide URI's in Entra ID en houd
-per omgeving een eigen `redirect_uri`.
+2. **Omleidings-URI in Entra ID.** App-registratie → **Verificatie** →
+   **URI toevoegen**:
+
+   ```
+   https://knap-apps.streamlit.app/oauth2callback
+   ```
+
+   Laat `http://localhost:8501/oauth2callback` er gewoon naast staan, dan blijft
+   lokaal ontwikkelen werken. Het pad `/oauth2callback` en het adres moeten
+   letterlijk kloppen — geen slash erachter, geen `www`.
+
+3. **Secrets in het dashboard.** In Streamlit Cloud: jouw app → **Settings** →
+   **Secrets**. Plak daar de inhoud van je `secrets.toml`, met één wijziging:
+
+   ```toml
+   redirect_uri = "https://knap-apps.streamlit.app/oauth2callback"
+   ```
+
+   Hier plak je het clientgeheim dus wél, maar in het dashboard van Streamlit en
+   niet in de repo. Dat is het hele punt van `secrets.toml` in `.gitignore`:
+   deze repo is publiek.
+
+4. **Zelf testen in een privévenster.** Open de app in een incognitovenster.
+   Je hoort het inlogscherm te zien, niet de hub. Probeer ook een pagina-URL
+   rechtstreeks (`https://knap-apps.streamlit.app/Selfbilling`) — ook daar moet
+   het inlogscherm komen.
+
+De app mag daarna gewoon op een openbaar adres blijven staan: het slot zit in de
+app zelf. Hem in Streamlit ook nog op *private* zetten met een lijst uitgenodigde
+e-mailadressen voegt weinig toe en zorgt voor twee keer inloggen.
 
 ## Wie mag erin
 
@@ -92,6 +141,24 @@ organisatie, dan zijn er twee manieren:
   **Eigenschappen** → *Toewijzing vereist* op **Ja**, en daarna een groep
   toewijzen. Toegang loopt dan mee met personeelswisselingen, zonder dat jij
   een lijst bijhoudt.
+
+## Wat je collega's moet vertellen
+
+- **Het adres** en dat ze inloggen met hun gewone MSN-account.
+- **De eerste keer duurt even.** Een gratis Community Cloud-app gaat na een
+  tijdje niets doen in de slaapstand. De eerste bezoeker daarna moet hem wakker
+  laten worden; dat kost een halve minuut. Daarna is het snel.
+- **De MOP-app onthoudt niets tussen sessies.** Zie de waarschuwing hieronder.
+
+## Grenzen van de gratis versie
+
+| Punt | Wat het betekent |
+| --- | --- |
+| **Slaapstand** | Na inactiviteit start de app opnieuw op bij de eerste bezoeker. |
+| **MOPAPP-database verdwijnt** | Die schrijft naar `/tmp` (zie `pages/MOPAPP.py`). Bij elke herstart zijn geïmporteerde MOP-tarieven weg. Importeer ze per sessie opnieuw, of laat hier een echte database achter zetten. |
+| **`data/tarieven/` ontbreekt** | Staat bewust niet in git, dus de tariefcontrole in Selfbilling werkt op de cloud alleen via handmatige upload. |
+| **Geheugen** | Ongeveer 1 GB per app. Grote Excels in meerdere pagina's tegelijk kunnen de app laten herstarten. Bij twijfel: minder rijen, of `st.cache_data` gebruiken. |
+| **Uploads zijn tijdelijk** | Bestanden die collega's uploaden worden in het geheugen verwerkt en niet opgeslagen. Dat is hier juist gunstig. |
 
 ## Lokaal ontwikkelen zonder Entra
 
