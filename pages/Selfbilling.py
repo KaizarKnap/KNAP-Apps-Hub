@@ -30,7 +30,7 @@ DEFAULT_PRICING_ALL = pd.DataFrame([
     {"leverancier": "Schuman",             "tarieftype": "per_kiep", "prijs": 0.00,  "afvalstroom": ""},
     {"leverancier": "Van Bruchem",         "tarieftype": "per_kiep", "prijs": 4.00,  "afvalstroom": ""},
     #{"leverancier": "N.V. Reinigingsdiensten Rd4", "tarieftype": "per_kiep", "prijs": 17.14, "afvalstroom": ""},
-    {"leverancier": "Rowill", "tarieftype": "per_kiep", "prijs": 150.00,  "afvalstroom": ""},
+    {"leverancier": "Rowill", "tarieftype": "per_kiep", "prijs": 160.00,  "afvalstroom": ""},
     # Bal: EUR 3,50 per stop. Meerdere ledigingen op dezelfde dag en locatie
     # leveren samen een stop op, dus niet per container vermenigvuldigen.
     {"leverancier": "Bal Recycling",       "tarieftype": "per_stop", "prijs": 3.50,  "afvalstroom": ""},
