@@ -2,12 +2,6 @@ import streamlit as st
 
 st.set_page_config(page_title="KNAP Apps Hub", layout="wide")
 
-# --- Toegang: alleen ingelogde collega's (zie auth.py) ---
-from auth import require_login
-
-require_login()
-
-
 # --- Layout en knop-styling (knoppen als kaarten) ---
 st.markdown(
     """

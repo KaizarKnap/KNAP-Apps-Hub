@@ -369,18 +369,6 @@ def mop_import_preview(excel_file, sheet_name="MOP"):
 
 # ---------------- UI ----------------
 st.set_page_config(page_title="MOP Pricing", layout="wide")
-
-# --- Toegang: alleen ingelogde collega's (zie auth.py in de repo-root) ---
-# Ook nodig op elke losse pagina: een pagina in pages/ is ook direct via
-# haar eigen URL op te vragen.
-import sys
-from pathlib import Path
-
-sys.path.append(str(Path(__file__).resolve().parents[1]))
-from auth import require_login
-
-require_login()
-
 init_db()
 
 st.title("MOP Pricing App")
