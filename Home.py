@@ -83,6 +83,11 @@ apps = [
         "Omwisselkosten analyseren en exporteren",
         "pages/OMKOAPP.py",
     ),
+    (
+        "### ⚖️ Kostenafwijking",
+        "Kostenafwijkingen analyseren en exporteren",
+        "pages/Kostenafwijking.py",
+    ),
 ]
 
 st.write("")
