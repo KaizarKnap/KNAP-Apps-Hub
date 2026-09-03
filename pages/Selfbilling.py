@@ -23,7 +23,7 @@ DEFAULT_PRICING_ALL = pd.DataFrame([
     {"leverancier": "Recycling-Continue", "tarieftype": "per_stop", "prijs": 4.00, "afvalstroom": ""},
     {"leverancier": "Gianluca",            "tarieftype": "per_stop", "prijs": 4.10, "afvalstroom": ""},
     {"leverancier": "Revema",              "tarieftype": "per_stop", "prijs": 4.00, "afvalstroom": ""},
-    {"leverancier": "Gogogo",              "tarieftype": "per_stop", "prijs": 3.00, "afvalstroom": ""},
+    #{"leverancier": "Gogogo",             "tarieftype": "per_stop", "prijs": 3.00, "afvalstroom": ""},  # gestopt
     {"leverancier": "Papierhandel Jansen", "tarieftype": "per_kiep", "prijs": 3.50, "afvalstroom": ""},
     {"leverancier": "Visser Assen",        "tarieftype": "per_kiep", "prijs": 4.00,  "afvalstroom": "Papier/Karton"},
     {"leverancier": "Visser Assen",        "tarieftype": "per_kiep", "prijs": 12.50, "afvalstroom": "Vertrouwelijk papier"},
@@ -41,7 +41,7 @@ DEFAULT_PRICING_ALL = pd.DataFrame([
 ])
 
 SUPPLIERS = [
-    "Recycling-Continue", "Gianluca", "Revema", "Gogogo",
+    "Recycling-Continue", "Gianluca", "Revema",  #"Gogogo" gestopt
     "Papierhandel Jansen", "Visser Assen", "Schuman", "Van Bruchem", "Rowill", #"N.V. Reinigingsdiensten Rd4"
     "Bal Recycling", "Meertens",
 ]
@@ -57,7 +57,7 @@ SUPPLIER_MATCH = {
 # Leveranciers die per stop betaald worden: meerdere orderregels op dezelfde
 # dag en hetzelfde locatienummer leveren samen één stopvergoeding op.
 PER_STOP_DEDUP_SUPPLIERS = (
-    "recycling-continue", "gianluca", "revema", "gogogo", "bal recycling",
+    "recycling-continue", "gianluca", "revema", "bal recycling",
 )
 
 SCHUMAN_PRICES = {
@@ -101,7 +101,7 @@ DEFAULT_GIANLUCA_LOCS = pd.DataFrame([
 # Leveranciers die hier niet in staan krijgen geen km-heffing:
 #   Papierhandel Jansen  - geen km-heffing afgesproken
 #   Rowill               - geen afspraken gemaakt
-#   Gianluca, Gogogo, Bal Recycling, Meertens - afspraak nog niet bekend
+#   Gianluca, Bal Recycling, Meertens - afspraak nog niet bekend
 KM_HEFFING = {
     "Van Bruchem":        {"haakarm_pct": 0.04, "karton_per_stop": 0.20},
     "Recycling-Continue": {"haakarm_pct": 0.03, "karton_per_stop": 0.20},
