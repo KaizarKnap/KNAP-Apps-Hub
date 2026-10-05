@@ -94,17 +94,20 @@ DEFAULT_GIANLUCA_LOCS = pd.DataFrame([
 ])
 
 # Km-heffing (vrachtwagenheffing) per leverancier, naast de brandstoftoeslag.
-#   haakarm_pct      = percentage over het orderbedrag van transportregels
-#                      (productomschrijving bevat "Transport")
+#   haakarm_pct      = percentage over het orderbedrag van transport- en
+#                      persregels (productomschrijving bevat "Transport" of
+#                      "Pers"), bv. Van Bruchem 4% over de pers van EUR 85
 #   karton_per_stop  = vast bedrag per stop bij een lediging Papier/Karton,
 #                      dus niet op transportregels en niet per container
 # Leveranciers die hier niet in staan krijgen geen km-heffing:
 #   Papierhandel Jansen  - geen km-heffing afgesproken
 #   Rowill               - geen afspraken gemaakt
 #   Gianluca, Bal Recycling, Meertens - afspraak nog niet bekend
+# Recycling-Continue: de 3% over transport/pers loopt los via Continue zelf,
+# daarom hier 0. Alleen de EUR 0,20 per karton-stop gaat via de self-billing.
 KM_HEFFING = {
     "Van Bruchem":        {"haakarm_pct": 0.04, "karton_per_stop": 0.20},
-    "Recycling-Continue": {"haakarm_pct": 0.03, "karton_per_stop": 0.20},
+    "Recycling-Continue": {"haakarm_pct": 0.00, "karton_per_stop": 0.20},
     "Revema":             {"haakarm_pct": 0.00, "karton_per_stop": 0.20},
     "Schuman":            {"haakarm_pct": 0.00, "karton_per_stop": 0.20},
     "Visser Assen":       {"haakarm_pct": 0.00, "karton_per_stop": 0.20},
@@ -149,7 +152,7 @@ def _header_score(cells) -> int:
     """Aantal cellen in een rij dat exact een bekende kolomnaam is."""
     return sum(
         1 for v in cells
-        if str(v).strip().replace("\u00A0", " ").lower() in HEADER_HINTS
+        if str(v).strip().replace(" ", " ").lower() in HEADER_HINTS
     )
 
 
@@ -162,7 +165,7 @@ def read_excel(file):
     header_index = int(scores.idxmax()) if scores.max() >= 3 else 0
     df = pd.read_excel(file, header=header_index)
 
-    df.columns = [str(c).strip().replace("\u00A0", " ") for c in df.columns]
+    df.columns = [str(c).strip().replace(" ", " ") for c in df.columns]
 
     # Lege hulpkolommen en de losse voettekst ("Toegepaste filters: ...") weg.
     df = df.loc[:, [not str(c).startswith("Unnamed") for c in df.columns]]
@@ -416,23 +419,33 @@ def is_transportregel(prod_txt: str) -> bool:
     return "transport" in str(prod_txt).lower()
 
 
+def is_persregel(prod_txt: str) -> bool:
+    """Pers-lediging, bv. de pers van Van Bruchem in Tiel of Geldermalsen."""
+    return "pers" in str(prod_txt).lower()
+
+
 def calc_km_heffing(row, bedrag, supplier_name, prod_txt, afst_norm, seen_karton_stops):
     """
     Km-heffing (vrachtwagenheffing) per order, naast de brandstoftoeslag.
-    - Transportregels: percentage over het orderbedrag (Van Bruchem 4%,
-      Recycling-Continue 3%).
+    - Transport- en persregels: percentage over het orderbedrag
+      (Van Bruchem 4%, dus EUR 3,40 over een pers van EUR 85).
     - Ledigingen Papier/Karton: vast bedrag per stop, dus eenmaal per
       ophaaldag + locatienummer en niet per container.
 
     Het percentage rekent over het kale orderbedrag, niet over de
     brandstoftoeslag heen, zodat de rekenvolgorde niet uitmaakt.
+
+    Persregels tellen alleen als percentageregel bij een leverancier met een
+    percentage. Bij de rest blijft een pers Papier/Karton gewoon de vaste
+    karton-heffing per stop krijgen, zoals voorheen.
     """
     afspraak = KM_HEFFING.get(supplier_name)
     if not afspraak:
         return 0.0, ""
 
-    if is_transportregel(prod_txt):
-        pct = float(afspraak.get("haakarm_pct", 0.0))
+    pct = float(afspraak.get("haakarm_pct", 0.0))
+
+    if is_transportregel(prod_txt) or (pct > 0 and is_persregel(prod_txt)):
         if pct <= 0:
             return 0.0, ""
         return round(float(bedrag) * pct, 2), f"Km-heffing haakarm {pct * 100:.0f}%"
@@ -716,7 +729,7 @@ def supplier_rules_editor(s: str, key_prefix: str) -> dict:
         if afspraak:
             regels = []
             if afspraak.get("haakarm_pct", 0):
-                regels.append(f"{afspraak['haakarm_pct'] * 100:.0f}% over transport-/haakarmregels")
+                regels.append(f"{afspraak['haakarm_pct'] * 100:.0f}% over transport-/persregels")
             if afspraak.get("karton_per_stop", 0):
                 bedrag_txt = f"{afspraak['karton_per_stop']:.2f}".replace(".", ",")
                 regels.append(f"€ {bedrag_txt} per stop bij lediging Papier/Karton")
