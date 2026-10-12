@@ -123,8 +123,25 @@ DEFAULT_RULES = {
     "rule_vanbruchem_add_kg_row": True,
     "rule_brandstoftoeslag": False,
     "rule_lege_uitgevoerd_nul": False,
-    "rule_km_heffing": True,
+    "rule_km_heffing": False,
 }
+
+# Bij welke leveranciers het vinkje van een toeslag standaard aan staat.
+# De rest staat standaard uit; per run blijft het vinkje aan te passen.
+BRANDSTOFTOESLAG_STANDAARD_AAN = {
+    "Recycling-Continue", "Rowill", "Schuman", "Van Bruchem",
+}
+KM_HEFFING_STANDAARD_AAN = {
+    "Recycling-Continue", "Revema", "Rowill", "Schuman", "Van Bruchem", "Visser Assen",
+}
+
+
+def standaard_regels(supplier_name: str) -> dict:
+    """DEFAULT_RULES met de toeslag-vinkjes die bij deze leverancier horen."""
+    r = DEFAULT_RULES.copy()
+    r["rule_brandstoftoeslag"] = supplier_name in BRANDSTOFTOESLAG_STANDAARD_AAN
+    r["rule_km_heffing"] = supplier_name in KM_HEFFING_STANDAARD_AAN
+    return r
 
 DEFAULT_KEYWORDS = ["balen", "zakken", "afzet", "pers"]
 
@@ -615,7 +632,7 @@ def process_supplier(
                 results.append(toeslag_row)
 
         # Km-heffing als extra orderregel, naast de brandstoftoeslag.
-        if rules.get("rule_km_heffing", True) and bedrag > 0:
+        if rules.get("rule_km_heffing", False) and bedrag > 0:
             km_bedrag, km_omschrijving = calc_km_heffing(
                 row=row,
                 bedrag=bedrag,
@@ -691,7 +708,7 @@ def supplier_pricing_default(s: str) -> pd.DataFrame:
 
 def supplier_rules_editor(s: str, key_prefix: str) -> dict:
     with st.expander(f"Regels: {s}", expanded=False):
-        r = DEFAULT_RULES.copy()
+        r = standaard_regels(s)
 
         r["rule_status_zero"] = st.checkbox(
             "Status (Gepland/Geannuleerd/Discussie) => bedrag 0",
@@ -809,7 +826,11 @@ else:
             key="pricing_single"
         )
 
-    rules_by_supplier[selected_supplier] = supplier_rules_editor(selected_supplier, key_prefix="rules_single")
+    # Leverancier in de sleutel, anders neemt Streamlit bij het wisselen van
+    # leverancier de vinkjes van de vorige leverancier mee.
+    rules_by_supplier[selected_supplier] = supplier_rules_editor(
+        selected_supplier, key_prefix=f"rules_single_{stable_key(selected_supplier)}"
+    )
 
     if selected_supplier.lower() == "schuman":
         with st.expander("Prijstabel Schuman", expanded=False):
@@ -985,7 +1006,7 @@ if process_all:
                 data_all=data_all,
                 supplier_name=s,
                 pricing_df=pricing_by_supplier.get(s, supplier_pricing_default(s)),
-                rules=rules_by_supplier.get(s, DEFAULT_RULES),
+                rules=rules_by_supplier.get(s, standaard_regels(s)),
                 gianluca_exceptions=(
                     gianluca_exceptions
                     if s.lower() == "gianluca"
